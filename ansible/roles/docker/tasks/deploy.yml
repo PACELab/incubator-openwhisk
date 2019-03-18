@@ -3,16 +3,16 @@
 ---
 # This role will install Docker using apt.
 
-- name: add docker repo
-  apt_repository:
-    repo: deb https://apt.dockerproject.org/repo ubuntu-trusty main
-    update_cache: yes
-    state: present
-  become: true
+#- name: add docker repo
+#  apt_repository:
+#    repo: deb https://apt.dockerproject.org/repo ubuntu-trusty main
+#    update_cache: yes
+#    state: present
+#  become: true
 
 - name: install docker
   apt:
-    name: "docker-engine={{ docker.version }}"
+    name: "docker-ce={{ docker.version }}"
     state: present
     force: yes
   become: true

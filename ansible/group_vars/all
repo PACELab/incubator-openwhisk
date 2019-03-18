@@ -248,7 +248,8 @@ docker:
   image:
     prefix: "{{ docker_image_prefix | default('whisk') }}"
     tag: "{{ docker_image_tag | default('latest') }}"
-  version: 1.12.0-0~trusty
+  #version: 1.12.0-0~trusty
+  version: 5:18.09.3~3-0~ubuntu-xenial
   storagedriver: overlay
   port: 4243
   restart:

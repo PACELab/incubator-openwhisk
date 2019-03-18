@@ -16,6 +16,6 @@
 
 - hosts: all:!ansible
   roles:
-  - whiskhost
+  #- whiskhost
   - docker
-  - prereq
+  #- prereq

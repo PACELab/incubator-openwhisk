@@ -26,7 +26,7 @@ kafkas
 
 [invokers]
 172.24.213.163              ansible_host=172.24.213.163
-172.24.78.39              ansible_host=10.3.2.159
+172.24.78.39              ansible_host=172.24.78.39
 
 [db]
 172.24.213.163               ansible_host=172.24.213.163
