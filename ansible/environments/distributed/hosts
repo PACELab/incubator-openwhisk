@@ -16,20 +16,22 @@ edge
 edge
 
 [controllers]
-172.24.56.82              ansible_host=172.24.56.82
+172.24.66.133              ansible_host=172.24.66.133
 
 [kafkas]
-172.24.56.82              ansible_host=172.24.56.82
+172.24.66.133              ansible_host=172.24.66.133
 
 [zookeepers:children]
 kafkas
 
 [invokers]
-172.24.78.39              ansible_host=172.24.78.39
+172.24.56.82              ansible_host=172.24.56.82
+172.24.213.163              ansible_host=172.24.213.163
+172.24.78.39                ansible_host=172.24.78.39
 172.24.195.252              ansible_host=172.24.195.252
 172.24.103.249              ansible_host=172.24.103.249
-172.24.34.140              ansible_host=172.24.34.140
-172.24.133.42              ansible_host=172.24.133.42
+172.24.34.140               ansible_host=172.24.34.140
+172.24.133.42               ansible_host=172.24.133.42
 
 [db]
-172.24.213.163               ansible_host=172.24.213.163
+172.24.66.133              ansible_host=172.24.66.133
