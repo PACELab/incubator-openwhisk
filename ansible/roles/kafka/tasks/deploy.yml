@@ -92,5 +92,5 @@
     grep /brokers/ids/{{ groups['kafkas'].index(inventory_hostname) }}
   register: result
   until: (result.rc == 0)
-  retries: 10
+  retries: 20
   delay: 5
