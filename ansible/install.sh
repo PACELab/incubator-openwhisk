@@ -13,5 +13,5 @@ ansible-playbook -i environments/distributed openwhisk.yml
 ansible-playbook -i environments/distributed postdeploy.yml
 ansible-playbook -i environments/distributed apigateway.yml
 ansible-playbook -i environments/distributed routemgmt.yml
-wsk property set --auth $(cat files/auth.guest) --apihost serverless-controller
+wsk property set --auth $(cat files/auth.guest) --apihost serverless-1
 wsk property set --auth $(cat files/auth.whisk.system) --apihost serverless-controller
