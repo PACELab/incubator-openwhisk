@@ -89,6 +89,7 @@ object DockerContainer {
     val args = Seq(
       "--cpu-shares",
       cpuShares.toString,
+      "--cpuset-cpus=0",
       "--memory",
       s"${memory.toMB}m",
       "--memory-swap",
