@@ -1735,6 +1735,12 @@
           "description": "timeout in milliseconds",
           "default": 60000
         },
+        "t1": {
+          "type": "integer",
+          "format": "int32",
+          "description": "tempParam for experimentation",
+          "default": 10
+        },
         "memory": {
           "type": "integer",
           "format": "int32",
