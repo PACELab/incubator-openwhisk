@@ -87,7 +87,7 @@ object DockerContainer {
     // NOTE: --dns-option on modern versions of docker, but is --dns-opt on docker 1.12
     val dnsOptString = if (docker.clientVersion.startsWith("1.12")) { "--dns-opt" } else { "--dns-option" }
     val cpuPct = if (memory.toMB > 128) 0.85 else 0.15 // setting memory of NN to be > 128, gets 85% CPU and rest 0.15 to IR workload
-    val forcedCpuShares = if (memory.toMB > 128) 1024 else 256 // setting memory of NN to be > 128, gets 85% CPU and rest 0.15 to IR workload
+    val forcedCpuShares = if (memory.toMB > 128) 512 else 512 // setting memory of NN to be > 128, gets 85% CPU and rest 0.15 to IR workload
     val args = Seq(
       // commenting these two lines
       //"--cpu-shares",
