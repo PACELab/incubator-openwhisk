@@ -90,11 +90,11 @@ object DockerContainer {
     val forcedCpuShares = if (memory.toMB > 128) 1024 else 1024 // setting memory of NN to be > 128, gets 85% CPU and rest 0.15 to IR workload
     val args = Seq(
       // commenting these two lines
-      //"--cpu-shares",
-      //cpuShares.toString,
-      "--cpu-shares="+forcedCpuShares.toString, //avs
+      "--cpu-shares",
+      cpuShares.toString,
+      //"--cpu-shares="+forcedCpuShares.toString, //avs
       //"--cpus="+cpuPct.toString, //avs
-      "--cpuset-cpus=0", // avs
+      //"--cpuset-cpus=0", // avs
       "--memory",
       s"${memory.toMB}m",
       "--memory-swap",
