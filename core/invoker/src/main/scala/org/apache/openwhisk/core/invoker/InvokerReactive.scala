@@ -105,7 +105,6 @@ class InvokerReactive(
           "--ulimit" -> Set("nofile=1024:1024"),
           "--pids-limit" -> Set("1024")) ++ logsProvider.containerParameters)
   containerFactory.init()
-
   CoordinatedShutdown(actorSystem)
     .addTask(CoordinatedShutdown.PhaseBeforeActorSystemTerminate, "cleanup runtime containers") { () =>
       containerFactory.cleanup()
@@ -120,7 +119,6 @@ class InvokerReactive(
   private val authStore = WhiskAuthStore.datastore()
 
   private val namespaceBlacklist = new NamespaceBlacklist(authStore)
-
   Scheduler.scheduleWaitAtMost(loadConfigOrThrow[NamespaceBlacklistConfig](ConfigKeys.blacklist).pollInterval) { () =>
     logging.debug(this, "running background job to update blacklist")
     namespaceBlacklist.refreshBlacklist()(ec, TransactionId.invoker).andThen {
@@ -153,7 +151,6 @@ class InvokerReactive(
                                                 userId: UUID,
                                                 isSlotFree: Boolean) => {
     implicit val transid: TransactionId = tid
-
     def send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
       val msg = if (isSlotFree) {
         val aid = res.fold(identity, _.activationId)
@@ -170,7 +167,7 @@ class InvokerReactive(
             s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId}")
       }
     }
-
+    
     // UserMetrics are sent, when the slot is free again. This ensures, that all metrics are sent.
     if (UserEvents.enabled && isSlotFree) {
       EventMessage.from(activationResult, s"invoker${instance.instance}", userId) match {
@@ -205,7 +202,7 @@ class InvokerReactive(
         }
     }.toList
   }
-
+  
   private val pool =
     actorSystem.actorOf(ContainerPool.props(childFactory, poolConfig, activationFeed, prewarmingConfigs))
 
@@ -218,7 +215,7 @@ class InvokerReactive(
         // active-ack.
 
         implicit val transid: TransactionId = msg.transid
-
+        logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 1. Start"); //avs
         //set trace context to continue tracing
         WhiskTracerProvider.tracer.setTraceContext(transid, msg.traceContext)
 
@@ -228,6 +225,7 @@ class InvokerReactive(
           val name = msg.action.name
           val actionid = FullyQualifiedEntityName(namespace, name).toDocId.asDocInfo(msg.revision)
           val subject = msg.user.subject
+          var coreToUse = -1 // avs
 
           logging.debug(this, s"${actionid.id} $subject ${msg.activationId}")
 
@@ -236,12 +234,14 @@ class InvokerReactive(
           // if the doc revision is missing, then bypass cache
           if (actionid.rev == DocRevision.empty) logging.warn(this, s"revision was not provided for ${actionid.id}")
 
+          logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 2. CheckingForExecutable"); //avs
+
           WhiskAction
             .get(entityStore, actionid.id, actionid.rev, fromCache = actionid.rev != DocRevision.empty)
             .flatMap { action =>
               action.toExecutableWhiskAction match {
                 case Some(executable) =>
-                  pool ! Run(executable, msg)
+                  pool ! Run(executable, msg,coreToUse) // avs : added coreToUse
                   Future.successful(())
                 case None =>
                   logging.error(this, s"non-executable action reached the invoker ${action.fullyQualifiedName(false)}")
@@ -270,6 +270,7 @@ class InvokerReactive(
                 Future.successful(())
             }
         } else {
+          logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 3. NamespaceBlacklisted"); //avs
           // Iff the current namespace is blacklisted, an active-ack is only produced to keep the loadbalancer protocol
           // Due to the protective nature of the blacklist, a database entry is not written.
           activationFeed ! MessageFeed.Processed

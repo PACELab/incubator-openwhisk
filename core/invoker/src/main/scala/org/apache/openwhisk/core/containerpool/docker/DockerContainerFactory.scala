@@ -59,12 +59,16 @@ class DockerContainerFactory(instance: InvokerInstanceId,
                                actionImage: ExecManifest.ImageName,
                                userProvidedImage: Boolean,
                                memory: ByteSize,
+                               coreToUse: Int,//avs
                                cpuShares: Int)(implicit config: WhiskConfig, logging: Logging): Future[Container] = {
+
+    logging.info(this, s"<avs_debug> <dockerContainerFactory:createContainer>"); //avs
     DockerContainer.create(
       tid,
       image =
         if (userProvidedImage) Left(actionImage) else Right(actionImage.localImageName(runtimesRegistryConfig.url)),
       memory = memory,
+      coreToUse = coreToUse, //avs
       cpuShares = cpuShares,
       environment = Map("__OW_API_HOST" -> config.wskApiHost),
       network = containerArgsConfig.network,

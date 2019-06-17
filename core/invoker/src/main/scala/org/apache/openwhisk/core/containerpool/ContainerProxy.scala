@@ -165,7 +165,7 @@ case class WarmedData(override val container: Container,
 
 // Events received by the actor
 case class Start(exec: CodeExec[_], memoryLimit: ByteSize)
-case class Run(action: ExecutableWhiskAction, msg: ActivationMessage, retryLogDeadline: Option[Deadline] = None)
+case class Run(action: ExecutableWhiskAction, msg: ActivationMessage, var coreToUse: Int,retryLogDeadline: Option[Deadline] = None)
 case object Remove
 
 // Events sent by the actor
@@ -214,7 +214,7 @@ case object RunCompleted
  * @param pauseGrace time to wait for new work before pausing the container
  */
 class ContainerProxy(
-  factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
+  factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int, Int) => Future[Container],
   sendActiveAck: ActiveAck,
   storeActivation: (TransactionId, WhiskActivation, UserContext) => Future[Any],
   collectLogs: (TransactionId, Identity, WhiskActivation, Container, ExecutableWhiskAction) => Future[ActivationLogs],
@@ -242,6 +242,7 @@ class ContainerProxy(
         job.exec.image,
         job.exec.pull,
         job.memoryLimit,
+        -1, // avs: coreToUse not setting it or prewarming containers.
         poolConfig.cpuShare(job.memoryLimit))
         .map(container => PreWarmCompleted(PreWarmedData(container, job.exec.kind, job.memoryLimit)))
         .pipeTo(self)
@@ -252,6 +253,7 @@ class ContainerProxy(
     case Event(job: Run, _) =>
       implicit val transid = job.msg.transid
       activeCount += 1
+      logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse}"); //avs
       // create a new container
       val container = factory(
         job.msg.transid,
@@ -259,6 +261,7 @@ class ContainerProxy(
         job.action.exec.image,
         job.action.exec.pull,
         job.action.limits.memory.megabytes.MB,
+        job.coreToUse, // avs
         poolConfig.cpuShare(job.action.limits.memory.megabytes.MB))
 
       // container factory will either yield a new container ready to execute the action, or
@@ -683,7 +686,7 @@ final case class ContainerProxyTimeoutConfig(idleContainer: FiniteDuration, paus
 
 object ContainerProxy {
   def props(
-    factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
+    factory: (TransactionId, String, ImageName, Boolean, ByteSize,Int, Int) => Future[Container],
     ack: (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID, Boolean) => Future[Any],
     store: (TransactionId, WhiskActivation, UserContext) => Future[Any],
     collectLogs: (TransactionId, Identity, WhiskActivation, Container, ExecutableWhiskAction) => Future[ActivationLogs],

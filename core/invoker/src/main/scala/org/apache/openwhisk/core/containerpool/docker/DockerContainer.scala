@@ -61,6 +61,7 @@ object DockerContainer {
   def create(transid: TransactionId,
              image: Either[ImageName, String],
              memory: ByteSize = 256.MB,
+             coreToUse: Int = -1, //avs
              cpuShares: Int = 0,
              environment: Map[String, String] = Map.empty,
              network: String = "bridge",
@@ -86,15 +87,17 @@ object DockerContainer {
 
     // NOTE: --dns-option on modern versions of docker, but is --dns-opt on docker 1.12
     val dnsOptString = if (docker.clientVersion.startsWith("1.12")) { "--dns-opt" } else { "--dns-option" }
+    // avs --begin
     val cpuPct = if (memory.toMB > 128) 0.85 else 0.15 // setting memory of NN to be > 128, gets 85% CPU and rest 0.15 to IR workload
-    val forcedCpuShares = if (memory.toMB > 128) 1024 else 1024 // setting memory of NN to be > 128, gets 85% CPU and rest 0.15 to IR workload
+    val forcedCpuShares = if (memory.toMB > 128) 512 else 512 // setting memory of NN to be > 128, gets 85% CPU and rest 0.15 to IR workload
+    val cpusetStr = if(coreToUse > -1) "--cpuset-cpus="+coreToUse.toString else "" //avs WARNING: Should fix this, since empty string is crashing the container.
+    // avs --end
     val args = Seq(
       // commenting these two lines
-      "--cpu-shares",
-      cpuShares.toString,
+      "--cpu-shares",cpuShares.toString,
       //"--cpu-shares="+forcedCpuShares.toString, //avs
       //"--cpus="+cpuPct.toString, //avs
-      //"--cpuset-cpus=0", // avs
+      //cpusetStr.toString, //"--cpuset-cpus=0", // avs
       "--memory",
       s"${memory.toMB}m",
       "--memory-swap",

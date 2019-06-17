@@ -109,6 +109,7 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
   /** Database service to get activations. */
   protected val activationStore: ActivationStore
 
+  protected val coreToUse = 0;// avs
   /** Entity normalizer to JSON object. */
   import RestApiCommons.emptyEntityToJsObject
 
@@ -550,6 +551,7 @@ trait WhiskActionsApi extends WhiskCollectionAPI with PostActionActivation with 
 
     val exec = content.exec getOrElse action.exec
 
+    logging.info(this, "<avs-debug> action.name: ${action.name} anc action.coreToUse: ${action.coreToUse} ")
     WhiskAction(
       action.namespace,
       action.name,

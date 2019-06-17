@@ -66,6 +66,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   var freePool = immutable.Map.empty[ActorRef, ContainerData]
   var busyPool = immutable.Map.empty[ActorRef, ContainerData]
   var prewarmedPool = immutable.Map.empty[ActorRef, ContainerData]
+  var canUseCore = -1; //avs  
   // If all memory slots are occupied and if there is currently no container to be removed, than the actions will be
   // buffered here to keep order of computation.
   // Otherwise actions with small memory-limits could block actions with large memory limits.
@@ -85,11 +86,12 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     val actionName = r.action.name.name
     val maxConcurrent = r.action.limits.concurrency.maxConcurrent
     val activationId = r.msg.activationId.toString
+    r.coreToUse = canUseCore //avs
 
     r.msg.transid.mark(
       this,
       LoggingMarkers.INVOKER_CONTAINER_START(containerState),
-      s"containerStart containerState: $containerState container: $container activations: $activeActivations of max $maxConcurrent action: $actionName namespace: $namespaceName activationId: $activationId",
+      s"containerStart containerState: $containerState container: $container activations: $activeActivations of max $maxConcurrent action: $actionName namespace: $namespaceName activationId: $activationId and canUseCore: ${canUseCore} and r.coreToUse ${r.coreToUse}",
       akka.event.Logging.InfoLevel)
   }
 
@@ -116,9 +118,11 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               .map(container => (container, container._2.initingState)) //warmed, warming, and warmingCold always know their state
               .orElse(
                 // There was no warm/warming/warmingCold container. Try to take a prewarm container or a cold container.
-
                 // Is there enough space to create a new container or do other containers have to be removed?
                 if (hasPoolSpaceFor(busyPool ++ freePool, r.action.limits.memory.megabytes.MB)) {
+                  canUseCore = ((canUseCore+1)%4); //avs
+                  logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore}"); //avs
+                  r.coreToUse = canUseCore
                   takePrewarmContainer(r.action)
                     .map(container => (container, "prewarmed"))
                     .orElse(Some(createContainer(r.action.limits.memory.megabytes.MB), "cold"))
@@ -164,6 +168,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
             }
             // Remove the action that get's executed now from the buffer and execute the next one afterwards.
             if (isResentFromBuffer) {
+              logging.info(this, s"<avs_debug> in r -> createdContainer - > isResentFromBuffer.1"); //avs
               // It is guaranteed that the currently executed messages is the head of the queue, if the message comes
               // from the buffer
               val (_, newBuffer) = runBuffer.dequeue
@@ -176,6 +181,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
             // this can also happen if createContainer fails to start a new container, or
             // if a job is rescheduled but the container it was allocated to has not yet destroyed itself
             // (and a new container would over commit the pool)
+            logging.info(this, s"<avs_debug> in r -> createdContainer - > None"); //avs
             val isErrorLogged = r.retryLogDeadline.map(_.isOverdue).getOrElse(true)
             val retryLogDeadline = if (isErrorLogged) {
               logging.error(
@@ -195,8 +201,17 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               // Add this request to the buffer, as it is not there yet.
               runBuffer = runBuffer.enqueue(r)
             }
+          
+            // avs --begin
+            if(r.coreToUse == -1){
+              logging.info(this, s"<avs_debug> ok allotting canUseCore: ${canUseCore} to this action: ${r.action.name.name}"); //avs
+              canUseCore = ((canUseCore+1)%4); //avs
+              r.coreToUse = canUseCore
+            }
+            // avs --end
+          
             // As this request is the first one in the buffer, try again to execute it.
-            self ! Run(r.action, r.msg, retryLogDeadline)
+            self ! Run(r.action, r.msg, r.coreToUse, retryLogDeadline)
         }
       } else {
         // There are currently actions waiting to be executed before this action gets executed.
@@ -204,6 +219,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         runBuffer = runBuffer.enqueue(r)
       }
 
+    logging.info(this, s"<avs_debug> in r -> createdContainer - > <NeedWork>"); //avs
     // Container is free to take more work
     case NeedWork(warmData: WarmedData) =>
       feed ! MessageFeed.Processed
@@ -260,10 +276,14 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
 
   /** Creates a new container and updates state accordingly. */
   def createContainer(memoryLimit: ByteSize): (ActorRef, ContainerData) = {
+    logging.info(this, s"<avs_debug> <cPool:createContainer> 1. canUseCore: ${canUseCore}"); //avs
     val ref = childFactory(context)
+    logging.info(this, s"<avs_debug> <cPool:createContainer> 2. canUseCore: ${canUseCore}") //avs
+
     val data = MemoryData(memoryLimit)
     freePool = freePool + (ref -> data)
     ref -> data
+    
   }
 
   /** Creates a new prewarmed container */
@@ -313,6 +333,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
    * @return true, if there is enough space for the given amount of memory.
    */
   def hasPoolSpaceFor[A](pool: Map[A, ContainerData], memory: ByteSize): Boolean = {
+    val cur_poolMemConsumption = memoryConsumptionOf(pool)
+    logging.info(this, s"<avs_debug> Checking for pool space -- i.e. (${cur_poolMemConsumption} + ${memory.toMB}) <= (${poolConfig.userMemory.toMB}) and canUseCore is --> ${canUseCore}") //avs
     memoryConsumptionOf(pool) + memory.toMB <= poolConfig.userMemory.toMB
   }
 }
