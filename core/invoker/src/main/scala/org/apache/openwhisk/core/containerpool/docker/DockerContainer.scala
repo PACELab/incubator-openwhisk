@@ -94,10 +94,10 @@ object DockerContainer {
     // avs --end
     val args = Seq(
       // commenting these two lines
-      "--cpu-shares",cpuShares.toString,
-      //"--cpu-shares="+forcedCpuShares.toString, //avs
+      //"--cpu-shares",cpuShares.toString,
+      "--cpu-shares="+forcedCpuShares.toString, //avs
       //"--cpus="+cpuPct.toString, //avs
-      //cpusetStr.toString, //"--cpuset-cpus=0", // avs
+      cpusetStr.toString, //"--cpuset-cpus=0", // avs
       "--memory",
       s"${memory.toMB}m",
       "--memory-swap",
