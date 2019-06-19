@@ -254,7 +254,8 @@ class ContainerProxy(
       implicit val transid = job.msg.transid
       activeCount += 1
       logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse}"); //avs
-      val sendCpuShares =  if(job.action.name.name == "imageResizing_v1") 768 else poolConfig.cpuShare(job.action.limits.memory.megabytes.MB); //if (memory.toMB > 128) 512 else 512
+      //val sendCpuShares =  if(job.action.name.name == "imageResizing_v1") 768 else (4*poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //if (memory.toMB > 128) 512 else 512
+      val sendCpuShares =  (4*poolConfig.cpuShare(job.action.limits.memory.megabytes.MB));
       // create a new container
       val container = factory(
         job.msg.transid,
