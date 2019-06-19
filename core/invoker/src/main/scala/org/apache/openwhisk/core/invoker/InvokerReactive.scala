@@ -215,7 +215,7 @@ class InvokerReactive(
         // active-ack.
 
         implicit val transid: TransactionId = msg.transid
-        logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 1. Start"); //avs
+        //logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 1. Start"); //avs
         //set trace context to continue tracing
         WhiskTracerProvider.tracer.setTraceContext(transid, msg.traceContext)
 
@@ -234,7 +234,7 @@ class InvokerReactive(
           // if the doc revision is missing, then bypass cache
           if (actionid.rev == DocRevision.empty) logging.warn(this, s"revision was not provided for ${actionid.id}")
 
-          logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 2. CheckingForExecutable"); //avs
+          //logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 2. CheckingForExecutable"); //avs
 
           WhiskAction
             .get(entityStore, actionid.id, actionid.rev, fromCache = actionid.rev != DocRevision.empty)
@@ -270,7 +270,7 @@ class InvokerReactive(
                 Future.successful(())
             }
         } else {
-          logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 3. NamespaceBlacklisted"); //avs
+          //logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 3. NamespaceBlacklisted"); //avs
           // Iff the current namespace is blacklisted, an active-ack is only produced to keep the loadbalancer protocol
           // Due to the protective nature of the blacklist, a database entry is not written.
           activationFeed ! MessageFeed.Processed

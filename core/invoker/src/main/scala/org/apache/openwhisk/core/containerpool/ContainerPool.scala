@@ -168,7 +168,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
             }
             // Remove the action that get's executed now from the buffer and execute the next one afterwards.
             if (isResentFromBuffer) {
-              logging.info(this, s"<avs_debug> in r -> createdContainer - > isResentFromBuffer.1"); //avs
               // It is guaranteed that the currently executed messages is the head of the queue, if the message comes
               // from the buffer
               val (_, newBuffer) = runBuffer.dequeue
@@ -181,7 +180,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
             // this can also happen if createContainer fails to start a new container, or
             // if a job is rescheduled but the container it was allocated to has not yet destroyed itself
             // (and a new container would over commit the pool)
-            logging.info(this, s"<avs_debug> in r -> createdContainer - > None"); //avs
             val isErrorLogged = r.retryLogDeadline.map(_.isOverdue).getOrElse(true)
             val retryLogDeadline = if (isErrorLogged) {
               logging.error(
@@ -204,7 +202,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           
             // avs --begin
             if(r.coreToUse == -1){
-              logging.info(this, s"<avs_debug> ok allotting canUseCore: ${canUseCore} to this action: ${r.action.name.name}"); //avs
               canUseCore = ((canUseCore+1)%4); //avs
               r.coreToUse = canUseCore
             }
@@ -219,7 +216,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         runBuffer = runBuffer.enqueue(r)
       }
 
-    logging.info(this, s"<avs_debug> in r -> createdContainer - > <NeedWork>"); //avs
     // Container is free to take more work
     case NeedWork(warmData: WarmedData) =>
       feed ! MessageFeed.Processed
@@ -276,9 +272,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
 
   /** Creates a new container and updates state accordingly. */
   def createContainer(memoryLimit: ByteSize): (ActorRef, ContainerData) = {
-    logging.info(this, s"<avs_debug> <cPool:createContainer> 1. canUseCore: ${canUseCore}"); //avs
     val ref = childFactory(context)
-    logging.info(this, s"<avs_debug> <cPool:createContainer> 2. canUseCore: ${canUseCore}") //avs
 
     val data = MemoryData(memoryLimit)
     freePool = freePool + (ref -> data)
