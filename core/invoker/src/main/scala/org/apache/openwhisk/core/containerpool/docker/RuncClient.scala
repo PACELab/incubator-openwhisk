@@ -63,6 +63,12 @@ class RuncClient(timeouts: RuncClientTimeouts = loadConfigOrThrow[RuncClientTime
   def resume(id: ContainerId)(implicit transid: TransactionId): Future[Unit] =
     runCmd(Seq("resume", id.asString), timeouts.resume).map(_ => ())
 
+  // avs --start
+  //def updateCpuShares(id: ContainerId): Future[Unit] = {
+  //  log.info(this,s"Hey there, just saying that you can use this function to update the stuff you hope to update containerID: ${id}")
+  //}
+  // avs --end  
+
   private def runCmd(args: Seq[String], timeout: Duration)(implicit transid: TransactionId): Future[String] = {
     val cmd = runcCmd ++ args
     val start = transid.started(
@@ -75,6 +81,7 @@ class RuncClient(timeouts: RuncClientTimeouts = loadConfigOrThrow[RuncClientTime
       case Failure(t) => transid.failed(this, start, t.getMessage, ErrorLevel)
     }
   }
+
 }
 
 trait RuncApi {
@@ -94,4 +101,9 @@ trait RuncApi {
    * @return a Future completing according to the command's exit-code
    */
   def resume(id: ContainerId)(implicit transid: TransactionId): Future[Unit]
+
+  //avs --begin
+  /** updateCpuShares, as suggested by containerPool**/ 
+  //def updateCpuShares(id: ContainerId)(implicit transid: TransactionId): Future[Unit]
+  // avs --end
 }

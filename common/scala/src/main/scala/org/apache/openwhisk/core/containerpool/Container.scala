@@ -97,6 +97,12 @@ trait Container {
     Future.successful({})
   }
 
+  //avs --begin
+  def updateCpuShares(): Future[Unit] = {
+    Future.successful({})
+  } // will be implemented by the child class.
+  //avs --end
+
   /** Obtains logs up to a given threshold from the container. Optionally waits for a sentinel to appear. */
   def logs(limit: ByteSize, waitForSentinel: Boolean)(implicit transid: TransactionId): Source[ByteString, Any]
 

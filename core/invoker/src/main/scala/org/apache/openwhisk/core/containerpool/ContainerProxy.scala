@@ -176,6 +176,8 @@ case object RescheduleJob // job is sent back to parent and could not be process
 case class PreWarmCompleted(data: PreWarmedData)
 case class InitCompleted(data: WarmedData)
 case object RunCompleted
+//case class updateStats(runtime: Long) // avs 
+case class updateStats(actionName: String,runtime: Long) //avs
 
 /**
  * A proxy that wraps a Container. It is used to keep track of the lifecycle
@@ -228,7 +230,8 @@ class ContainerProxy(
   implicit val logging = new AkkaLogging(context.system.log)
   var rescheduleJob = false // true iff actor receives a job but cannot process it because actor will destroy itself
   var runBuffer = immutable.Queue.empty[Run] //does not retain order, but does manage jobs that would have pushed past action concurrency limit
-
+  var numActivationsServed = 0;
+  var prevActivationTime : Long = 0;
   //keep a separate count to avoid confusion with ContainerState.activeActivationCount that is tracked/modified only in ContainerPool
   var activeCount = 0;
   startWith(Uninitialized, NoData())
@@ -242,7 +245,7 @@ class ContainerProxy(
         job.exec.image,
         job.exec.pull,
         job.memoryLimit,
-        -1, // avs: coreToUse not setting it or prewarming containers.
+        -1, // avs: coreToUse not setting it for prewarming containers.
         poolConfig.cpuShare(job.memoryLimit))
         .map(container => PreWarmCompleted(PreWarmedData(container, job.exec.kind, job.memoryLimit)))
         .pipeTo(self)
@@ -253,7 +256,7 @@ class ContainerProxy(
     case Event(job: Run, _) =>
       implicit val transid = job.msg.transid
       activeCount += 1
-      logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse}"); //avs
+      logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse} and numActivationsServed: ${numActivationsServed}"); //avs
       val sendCpuShares =  if(job.action.name.name == "imageResizing_v1") 256 else (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //if (memory.toMB > 128) 512 else 512
       //val sendCpuShares =  (4*poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //avs
       // create a new container
@@ -356,6 +359,9 @@ class ContainerProxy(
     case Event(RunCompleted, data: WarmedData) =>
       activeCount -= 1
 
+      //context.parent ! updateStats(numActivationsServed) //avs 
+      context.parent ! updateStats(data.action.name.asString,prevActivationTime) //avs 
+      prevActivationTime = 0;
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay
       if (requestWork(data) || activeCount > 0) {
         stay using data
@@ -642,6 +648,13 @@ class ContainerProxy(
           Future.successful(Right(activation))
         } else {
           val start = tid.started(this, LoggingMarkers.INVOKER_COLLECT_LOGS, logLevel = InfoLevel)
+
+          // avs --start
+          numActivationsServed = numActivationsServed+1; //avs
+          logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed}"); //avs 
+          prevActivationTime = activation.duration getOrElse 0;
+          // avs --end
+
           collectLogs(tid, job.msg.user, activation, container, job.action)
             .andThen {
               case Success(_) => tid.finished(this, start)

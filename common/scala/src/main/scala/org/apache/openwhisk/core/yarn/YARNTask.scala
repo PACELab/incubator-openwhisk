@@ -67,6 +67,13 @@ class YARNTask(override protected val id: ContainerId,
     Future.successful(Unit)
   }
 
+  // avs --begin
+  override def updateCpuShares(): Future[Unit] = {
+    super.updateCpuShares()
+  }
+  // avs --end
+
+
   /** Completely destroys this instance of the container. */
   override def destroy()(implicit transid: TransactionId): Future[Unit] = {
 

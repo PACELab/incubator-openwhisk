@@ -213,6 +213,12 @@ class MesosTask(override protected val id: ContainerId,
   override def destroy()(implicit transid: TransactionId): Future[Unit] = {
     MesosTask.destroy(mesosClientActor, mesosConfig, taskId)
   }
+  // avs --begin
+  override def updateCpuShares(): Future[Unit] = {
+    super.updateCpuShares()
+  }
+  // avs --end
+
 
   /**
    * Obtains logs up to a given threshold from the container. Optionally waits for a sentinel to appear.

@@ -33,6 +33,8 @@ case object Busy extends WorkerState
 case object Free extends WorkerState
 
 case class WorkerData(data: ContainerData, state: WorkerState)
+case class RunSumCount[A,B](var _1: A, var _2: B) {} //avs
+//implicit def doublet_to_tuple[A,B](db: RunSumCount[A,B]) = (db._1, db._2)
 
 /**
  * A pool managing containers to run actions on.
@@ -66,6 +68,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   var freePool = immutable.Map.empty[ActorRef, ContainerData]
   var busyPool = immutable.Map.empty[ActorRef, ContainerData]
   var prewarmedPool = immutable.Map.empty[ActorRef, ContainerData]
+  var avgActionRuntime = immutable.Map.empty[String,RunSumCount[Long,Int]] //avs
+  var allContainersOfAnAction = immutable.Map.empty[String,Container] //avs
   var canUseCore = -1; //avs  
   // If all memory slots are occupied and if there is currently no container to be removed, than the actions will be
   // buffered here to keep order of computation.
@@ -120,9 +124,17 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                 // There was no warm/warming/warmingCold container. Try to take a prewarm container or a cold container.
                 // Is there enough space to create a new container or do other containers have to be removed?
                 if (hasPoolSpaceFor(busyPool ++ freePool, r.action.limits.memory.megabytes.MB)) {
-                  canUseCore = ((canUseCore+1)%4); //avs
-                  logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore}"); //avs
-                  r.coreToUse = canUseCore
+                  
+                  // avs --begin
+                  canUseCore = ((canUseCore+1)%4); 
+                  avgActionRuntime.get(r.action.name.asString) match {
+                    case Some(e) => avgActionRuntime(r.action.name.asString)._1+=0 // dummy operation
+                    case None => avgActionRuntime = avgActionRuntime + (r.action.name.asString -> RunSumCount(0,0))
+                  }
+
+                  logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}"); 
+                  r.coreToUse = canUseCore 
+                  // avs --end
                   takePrewarmContainer(r.action)
                     .map(container => (container, "prewarmed"))
                     .orElse(Some(createContainer(r.action.limits.memory.megabytes.MB), "cold"))
@@ -174,6 +186,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               runBuffer = newBuffer
               runBuffer.dequeueOption.foreach { case (run, _) => self ! run }
             }
+            logging.info(this, s"<avs_debug> 1. busyPool.size: ${busyPool.size}"); //avs
             actor ! r // forwards the run request to the container
             logContainerStart(r, containerState, newData.activeActivationCount, container)
           case None =>
@@ -206,7 +219,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               r.coreToUse = canUseCore
             }
             // avs --end
-          
+            logging.info(this, s"<avs_debug> 2. busyPool.size: ${busyPool.size}"); //avs
             // As this request is the first one in the buffer, try again to execute it.
             self ! Run(r.action, r.msg, r.coreToUse, retryLogDeadline)
         }
@@ -239,6 +252,9 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         busyPool = busyPool + (sender() -> newData)
         freePool = freePool - sender()
       }
+      //avs --begin
+      allContainersOfAnAction = allContainersOfAnAction + (warmData.action.name.asString -> warmData.container)
+      // avs --end
 
     // Container is prewarmed and ready to take work
     case NeedWork(data: PreWarmedData) =>
@@ -268,6 +284,32 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     case RescheduleJob =>
       freePool = freePool - sender()
       busyPool = busyPool - sender()
+
+    //avs --begin
+    case updateStats(actionName: String,runtime: Long) => 
+      /*if(avgActionRuntime.contains(actionName)) {
+        avgActionRuntime(actionName)._1 = (avgActionRuntime(actionName)._1+runtime)
+        avgActionRuntime(actionName)._2 = (avgActionRuntime(actionName)._2+1)
+        logging.info(this, s"<avs_debug> 1. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}"); 
+        if(allContainersOfAnAction.contains(actionName)){
+          val containerName = allContainersOfAnAction(actionName);
+          containerName.updateCpuShares() 
+        }
+      }else{
+        avgActionRuntime = avgActionRuntime + (actionName-> RunSumCount(runtime,1)) 
+        logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}"); 
+      }*/
+
+    avgActionRuntime.get(actionName) match {
+      case Some(e) => 
+          avgActionRuntime(actionName)._1+=runtime
+          avgActionRuntime(actionName)._2+=1
+          logging.info(this, s"<avs_debug> 1. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
+      case None => 
+          avgActionRuntime = avgActionRuntime + (actionName -> RunSumCount(runtime,1))
+          logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
+    }      
+    //avs --end
   }
 
   /** Creates a new container and updates state accordingly. */
