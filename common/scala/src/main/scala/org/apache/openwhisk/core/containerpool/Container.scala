@@ -98,7 +98,7 @@ trait Container {
   }
 
   //avs --begin
-  def updateCpuShares(): Future[Unit] = {
+  def updateCpuShares(transid: TransactionId,cpuShares: Int): Future[Unit] = {
     Future.successful({})
   } // will be implemented by the child class.
   //avs --end

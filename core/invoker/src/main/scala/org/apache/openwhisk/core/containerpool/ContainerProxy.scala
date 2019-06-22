@@ -230,8 +230,10 @@ class ContainerProxy(
   implicit val logging = new AkkaLogging(context.system.log)
   var rescheduleJob = false // true iff actor receives a job but cannot process it because actor will destroy itself
   var runBuffer = immutable.Queue.empty[Run] //does not retain order, but does manage jobs that would have pushed past action concurrency limit
+  // avs --begin
   var numActivationsServed = 0;
   var prevActivationTime : Long = 0;
+  // avs --end
   //keep a separate count to avoid confusion with ContainerState.activeActivationCount that is tracked/modified only in ContainerPool
   var activeCount = 0;
   startWith(Uninitialized, NoData())
@@ -358,16 +360,17 @@ class ContainerProxy(
     // Run was successful
     case Event(RunCompleted, data: WarmedData) =>
       activeCount -= 1
-
       //context.parent ! updateStats(numActivationsServed) //avs 
       context.parent ! updateStats(data.action.name.asString,prevActivationTime) //avs 
-      prevActivationTime = 0;
+      prevActivationTime = 0;//avs
+
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay
       if (requestWork(data) || activeCount > 0) {
         stay using data
       } else {
         goto(Ready) using data
       }
+
     case Event(job: Run, data: WarmedData)
         if activeCount >= data.action.limits.concurrency.maxConcurrent && !rescheduleJob => //if we are over concurrency limit, and not a failure on resume
       logging.warn(this, s"buffering for container ${data.container}; ${activeCount} activations in flight")
@@ -653,6 +656,7 @@ class ContainerProxy(
           numActivationsServed = numActivationsServed+1; //avs
           logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed}"); //avs 
           prevActivationTime = activation.duration getOrElse 0;
+          // WARNING: not sure whether this could break it, if there are some errors. 
           // avs --end
 
           collectLogs(tid, job.msg.user, activation, container, job.action)

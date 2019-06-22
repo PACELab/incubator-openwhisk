@@ -68,8 +68,8 @@ class YARNTask(override protected val id: ContainerId,
   }
 
   // avs --begin
-  override def updateCpuShares(): Future[Unit] = {
-    super.updateCpuShares()
+  override def updateCpuShares(transid: TransactionId,cpuShares: Int): Future[Unit] = {
+    super.updateCpuShares(transid,cpuShares)
   }
   // avs --end
 

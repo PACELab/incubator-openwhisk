@@ -191,11 +191,13 @@ class DockerContainer(protected val id: ContainerId,
     (if (useRunc) { runc.resume(id) } else { docker.unpause(id) }).flatMap(_ => super.resume())
   }
   // avs --begin
-  override def updateCpuShares(): Future[Unit] = {
-    //(if (useRunc) { runc.updateCpuShares(id) } else { logging.info(this,"\t <avs_debug> useRunc not set for contID: ${id}") }).flatMap(_ => super.updateCpuShares())
-    //logging.info(this,s"Hey there, just saying that you can use this function to update the stuff you hope to update containerID: ${id}")
-    //ByteString(LogLine(Instant.now.toString, "stderr", s"Hey there, just saying that you can use this function to update the stuff you hope to update containerID: ${id}"))
-    super.updateCpuShares()
+  override def updateCpuShares(transid: TransactionId,cpuShares: Int): Future[Unit] = {
+    if(useRunc){ 
+      runc.updateCpuShares(id,transid,cpuShares) 
+    }else{
+      //logging.info(this,"\t <avs_debug> useRunc not set for contID: ${id}") 
+      super.updateCpuShares(transid,cpuShares)
+    }
   }
   // avs --end
 

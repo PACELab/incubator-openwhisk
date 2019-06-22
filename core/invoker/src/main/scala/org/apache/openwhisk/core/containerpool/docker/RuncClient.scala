@@ -64,9 +64,11 @@ class RuncClient(timeouts: RuncClientTimeouts = loadConfigOrThrow[RuncClientTime
     runCmd(Seq("resume", id.asString), timeouts.resume).map(_ => ())
 
   // avs --start
-  //def updateCpuShares(id: ContainerId): Future[Unit] = {
-  //  log.info(this,s"Hey there, just saying that you can use this function to update the stuff you hope to update containerID: ${id}")
-  //}
+  def updateCpuShares(id: ContainerId,ipTransid: TransactionId,cpuShares: Int): Future[Unit] = {
+    //log.info(this,s"Hey there, just saying that you can use this function to update the stuff you hope to update containerID: ${id}")
+    implicit val transid = ipTransid
+    runCmd(Seq("update", id.asString,"--cpu-share="+cpuShares.toString), timeouts.resume).map(_ => ())    
+  }
   // avs --end  
 
   private def runCmd(args: Seq[String], timeout: Duration)(implicit transid: TransactionId): Future[String] = {
@@ -104,6 +106,6 @@ trait RuncApi {
 
   //avs --begin
   /** updateCpuShares, as suggested by containerPool**/ 
-  //def updateCpuShares(id: ContainerId)(implicit transid: TransactionId): Future[Unit]
+  def updateCpuShares(id: ContainerId,ipTransid: TransactionId,cpuShares: Int): Future[Unit]
   // avs --end
 }

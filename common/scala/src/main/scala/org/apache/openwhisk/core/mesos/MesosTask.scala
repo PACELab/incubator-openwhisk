@@ -214,8 +214,8 @@ class MesosTask(override protected val id: ContainerId,
     MesosTask.destroy(mesosClientActor, mesosConfig, taskId)
   }
   // avs --begin
-  override def updateCpuShares(): Future[Unit] = {
-    super.updateCpuShares()
+  override def updateCpuShares(transid: TransactionId,cpuShares: Int): Future[Unit] = {
+    super.updateCpuShares(transid,cpuShares)
   }
   // avs --end
 

@@ -33,8 +33,8 @@ case object Busy extends WorkerState
 case object Free extends WorkerState
 
 case class WorkerData(data: ContainerData, state: WorkerState)
-case class RunSumCount[A,B](var _1: A, var _2: B) {} //avs
-//implicit def doublet_to_tuple[A,B](db: RunSumCount[A,B]) = (db._1, db._2)
+case class MutableTriplet[A,B,C](var _1: A, var _2: B, var _3: C) {} //avs
+//implicit def doublet_to_tuple[A,B](db: MutableTriplet[A,B]) = (db._1, db._2)
 
 /**
  * A pool managing containers to run actions on.
@@ -68,7 +68,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   var freePool = immutable.Map.empty[ActorRef, ContainerData]
   var busyPool = immutable.Map.empty[ActorRef, ContainerData]
   var prewarmedPool = immutable.Map.empty[ActorRef, ContainerData]
-  var avgActionRuntime = immutable.Map.empty[String,RunSumCount[Long,Int]] //avs
+  var avgActionRuntime = immutable.Map.empty[String,MutableTriplet[Long,Int,TransactionId]] //avs
   var allContainersOfAnAction = immutable.Map.empty[String,Container] //avs
   var canUseCore = -1; //avs  
   // If all memory slots are occupied and if there is currently no container to be removed, than the actions will be
@@ -129,7 +129,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                   canUseCore = ((canUseCore+1)%4); 
                   avgActionRuntime.get(r.action.name.asString) match {
                     case Some(e) => avgActionRuntime(r.action.name.asString)._1+=0 // dummy operation
-                    case None => avgActionRuntime = avgActionRuntime + (r.action.name.asString -> RunSumCount(0,0))
+                    case None => avgActionRuntime = avgActionRuntime + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
                   }
 
                   logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}"); 
@@ -286,6 +286,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       busyPool = busyPool - sender()
 
     //avs --begin
+    //case updateStats(actionName: String,runtime: Long) => 
     case updateStats(actionName: String,runtime: Long) => 
       /*if(avgActionRuntime.contains(actionName)) {
         avgActionRuntime(actionName)._1 = (avgActionRuntime(actionName)._1+runtime)
@@ -296,7 +297,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           containerName.updateCpuShares() 
         }
       }else{
-        avgActionRuntime = avgActionRuntime + (actionName-> RunSumCount(runtime,1)) 
+        avgActionRuntime = avgActionRuntime + (actionName-> MutableTriplet(runtime,1)) 
         logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}"); 
       }*/
 
@@ -304,10 +305,17 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       case Some(e) => 
           avgActionRuntime(actionName)._1+=runtime
           avgActionRuntime(actionName)._2+=1
+          val transid: TransactionId = avgActionRuntime(actionName)._3
           logging.info(this, s"<avs_debug> 1. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
+          if(allContainersOfAnAction.contains(actionName)){
+            val containerName = allContainersOfAnAction(actionName);
+            logging.info(this, s"<avs_debug> calling updateFor container... ")
+            containerName.updateCpuShares(transid,768) 
+            logging.info(this, s"<avs_debug> DONE with calling updateFor container... ")
+          }          
       case None => 
-          avgActionRuntime = avgActionRuntime + (actionName -> RunSumCount(runtime,1))
-          logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
+          //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
+          logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly!");         
     }      
     //avs --end
   }
