@@ -186,7 +186,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               runBuffer = newBuffer
               runBuffer.dequeueOption.foreach { case (run, _) => self ! run }
             }
-            logging.info(this, s"<avs_debug> 1. busyPool.size: ${busyPool.size}"); //avs
             actor ! r // forwards the run request to the container
             logContainerStart(r, containerState, newData.activeActivationCount, container)
           case None =>
@@ -219,7 +218,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               r.coreToUse = canUseCore
             }
             // avs --end
-            logging.info(this, s"<avs_debug> 2. busyPool.size: ${busyPool.size}"); //avs
             // As this request is the first one in the buffer, try again to execute it.
             self ! Run(r.action, r.msg, r.coreToUse, retryLogDeadline)
         }
@@ -306,13 +304,13 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           avgActionRuntime(actionName)._1+=runtime
           avgActionRuntime(actionName)._2+=1
           val transid: TransactionId = avgActionRuntime(actionName)._3
-          logging.info(this, s"<avs_debug> 1. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
-          if(allContainersOfAnAction.contains(actionName)){
+          //logging.info(this, s"<avs_debug> 1. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
+          /*if(allContainersOfAnAction.contains(actionName)){
             val containerName = allContainersOfAnAction(actionName);
             logging.info(this, s"<avs_debug> calling updateFor container... ")
             containerName.updateCpuShares(transid,768) 
             logging.info(this, s"<avs_debug> DONE with calling updateFor container... ")
-          }          
+          } */         
       case None => 
           //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
           logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly!");         
@@ -378,7 +376,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
    */
   def hasPoolSpaceFor[A](pool: Map[A, ContainerData], memory: ByteSize): Boolean = {
     val cur_poolMemConsumption = memoryConsumptionOf(pool)
-    logging.info(this, s"<avs_debug> Checking for pool space -- i.e. (${cur_poolMemConsumption} + ${memory.toMB}) <= (${poolConfig.userMemory.toMB}) and canUseCore is --> ${canUseCore}") //avs
+    //logging.info(this, s"<avs_debug> Checking for pool space -- i.e. (${cur_poolMemConsumption} + ${memory.toMB}) <= (${poolConfig.userMemory.toMB}) and canUseCore is --> ${canUseCore}") //avs
     memoryConsumptionOf(pool) + memory.toMB <= poolConfig.userMemory.toMB
   }
 }

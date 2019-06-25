@@ -258,8 +258,10 @@ class ContainerProxy(
     case Event(job: Run, _) =>
       implicit val transid = job.msg.transid
       activeCount += 1
-      logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse} and numActivationsServed: ${numActivationsServed}"); //avs
-      val sendCpuShares =  if(job.action.name.name == "imageResizing_v1") 256 else (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //if (memory.toMB > 128) 512 else 512
+      //logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse} and numActivationsServed: ${numActivationsServed}"); //avs
+      //val sendCpuShares =  if(job.action.name.name == "imageResizing_v1") 256 else (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //if (memory.toMB > 128) 512 else 512
+      val sendCpuShares =  (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB));
+
       //val sendCpuShares =  (4*poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //avs
       // create a new container
       val container = factory(
@@ -654,7 +656,7 @@ class ContainerProxy(
 
           // avs --start
           numActivationsServed = numActivationsServed+1; //avs
-          logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed}"); //avs 
+          //logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed}"); //avs 
           prevActivationTime = activation.duration getOrElse 0;
           // WARNING: not sure whether this could break it, if there are some errors. 
           // avs --end
