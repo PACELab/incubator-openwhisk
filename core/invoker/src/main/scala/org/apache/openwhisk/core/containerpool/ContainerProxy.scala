@@ -176,9 +176,19 @@ case object RescheduleJob // job is sent back to parent and could not be process
 case class PreWarmCompleted(data: PreWarmedData)
 case class InitCompleted(data: WarmedData)
 case object RunCompleted
-//case class updateStats(runtime: Long) // avs 
-case class updateStats(actionName: String,runtime: Long) //avs
 
+case class UpdateStats(actionName: String,runtime: Long) //avs
+case class RemoveContTracking(container: Container, actionName: String) //avs
+
+/*
+class trackFunctionStats(private var actionName: String, private val curId: TransactionId){
+  private var cumulRuntime: Long = 0;
+  private var numInvocations: Long = 0;
+  private var curCpuShares: Int = 0;
+  private var allCpuShares: ListBuffer[Int] = new mutable.ListBuffer[Int];
+
+}
+*/
 /**
  * A proxy that wraps a Container. It is used to keep track of the lifecycle
  * of a container and to guarantee a contract between the client of the container
@@ -341,7 +351,7 @@ class ContainerProxy(
         .pipeTo(self)
       goto(Running) using PreWarmedData(data.container, data.kind, data.memoryLimit, 1)
 
-    case Event(Remove, data: PreWarmedData) => destroyContainer(data.container)
+    case Event(Remove, data: PreWarmedData) => destroyContainer(data.container,"PreWarmed")
   }
 
   when(Running) {
@@ -362,8 +372,8 @@ class ContainerProxy(
     // Run was successful
     case Event(RunCompleted, data: WarmedData) =>
       activeCount -= 1
-      //context.parent ! updateStats(numActivationsServed) //avs 
-      context.parent ! updateStats(data.action.name.asString,prevActivationTime) //avs 
+      //context.parent ! UpdateStats(numActivationsServed) //avs 
+      context.parent ! UpdateStats(data.action.name.asString,prevActivationTime) //avs 
       prevActivationTime = 0;//avs
 
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay
@@ -391,12 +401,12 @@ class ContainerProxy(
     // Failed after /init (the first run failed)
     case Event(_: FailureMessage, data: PreWarmedData) =>
       activeCount -= 1
-      destroyContainer(data.container)
+      destroyContainer(data.container,"PreWarmed")
 
     // Failed for a subsequent /run
     case Event(_: FailureMessage, data: WarmedData) =>
       activeCount -= 1
-      destroyContainer(data.container)
+      destroyContainer(data.container,data.action.name.asString)
 
     // Failed at getting a container for a cold-start run
     case Event(_: FailureMessage, _) =>
@@ -424,12 +434,12 @@ class ContainerProxy(
       data.container.suspend()(TransactionId.invokerNanny).map(_ => ContainerPaused).pipeTo(self)
       goto(Pausing)
 
-    case Event(Remove, data: WarmedData) => destroyContainer(data.container)
+    case Event(Remove, data: WarmedData) => destroyContainer(data.container,data.action.name.asString)
   }
 
   when(Pausing) {
     case Event(ContainerPaused, data: WarmedData)   => goto(Paused)
-    case Event(_: FailureMessage, data: WarmedData) => destroyContainer(data.container)
+    case Event(_: FailureMessage, data: WarmedData) => destroyContainer(data.container,data.action.name.asString)
     case _                                          => delay
   }
 
@@ -457,7 +467,7 @@ class ContainerProxy(
     // container is reclaimed by the pool or it has become too old
     case Event(StateTimeout | Remove, data: WarmedData) =>
       rescheduleJob = true // to supress sending message to the pool and not double count
-      destroyContainer(data.container)
+      destroyContainer(data.container,data.action.name.asString)
   }
 
   when(Removing) {
@@ -465,7 +475,9 @@ class ContainerProxy(
       // Send the job back to the pool to be rescheduled
       context.parent ! job
       stay
-    case Event(ContainerRemoved, _)  => stop()
+    case Event(ContainerRemoved, _)  => 
+      stop()
+
     case Event(_: FailureMessage, _) => stop()
   }
 
@@ -509,7 +521,12 @@ class ContainerProxy(
    *
    * @param container the container to destroy
    */
-  def destroyContainer(container: Container) = {
+  def destroyContainer(container: Container, actionName: String) = {
+  //def destroyContainer(container: Container) = {
+    //avs --begin
+    logging.info(this, s"<avs_debug> 1. about to destroyTheContainer for function");         
+    context.parent ! RemoveContTracking(container,actionName)  // RemoveContTracking(container: Container, actionName: String)
+    // avs --end
     if (!rescheduleJob) {
       context.parent ! ContainerRemoved
     } else {

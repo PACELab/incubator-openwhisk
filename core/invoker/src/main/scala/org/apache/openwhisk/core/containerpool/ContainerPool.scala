@@ -25,8 +25,10 @@ import org.apache.openwhisk.core.entity.size._
 
 import scala.annotation.tailrec
 import scala.collection.immutable
+import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.util.Try
+import scala.collection.mutable.ListBuffer //avs
 
 sealed trait WorkerState
 case object Busy extends WorkerState
@@ -69,14 +71,23 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   var busyPool = immutable.Map.empty[ActorRef, ContainerData]
   var prewarmedPool = immutable.Map.empty[ActorRef, ContainerData]
   var avgActionRuntime = immutable.Map.empty[String,MutableTriplet[Long,Int,TransactionId]] //avs
-  var allContainersOfAnAction = immutable.Map.empty[String,Container] //avs
+  var allContainersOfAnAction = mutable.Map.empty[String,ListBuffer[Container]] //avs
+  var containerStandaloneRuntime = immutable.Map.empty[String,Double] //avs
   var canUseCore = -1; //avs  
+
   // If all memory slots are occupied and if there is currently no container to be removed, than the actions will be
   // buffered here to keep order of computation.
   // Otherwise actions with small memory-limits could block actions with large memory limits.
   var runBuffer = immutable.Queue.empty[Run]
   val logMessageInterval = 10.seconds
 
+  // avs --begin
+  // Assuming that this is called in the beginning ala container.
+  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->635.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->6350.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->18000.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1350.0)
+  // avs --end
   prewarmConfig.foreach { config =>
     logging.info(this, s"pre-warming ${config.count} ${config.exec.kind} ${config.memoryLimit.toString}")(
       TransactionId.invokerWarmup)
@@ -97,6 +108,19 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       LoggingMarkers.INVOKER_CONTAINER_START(containerState),
       s"containerStart containerState: $containerState container: $container activations: $activeActivations of max $maxConcurrent action: $actionName namespace: $namespaceName activationId: $activationId and canUseCore: ${canUseCore} and r.coreToUse ${r.coreToUse}",
       akka.event.Logging.InfoLevel)
+  }
+
+  def addFunctionRuntime(functionName: String): Unit = {
+    if(functionName == "imageResizing_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 635.0)  
+    }else if (functionName == "rodinia_nn_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 6350.0)  
+    }else if (functionName == "euler3d_cpu_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000.0)  
+    }else if (functionName == "servingCNN_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
+    }
+    
   }
 
   def receive: Receive = {
@@ -129,7 +153,14 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                   canUseCore = ((canUseCore+1)%4); 
                   avgActionRuntime.get(r.action.name.asString) match {
                     case Some(e) => avgActionRuntime(r.action.name.asString)._1+=0 // dummy operation
-                    case None => avgActionRuntime = avgActionRuntime + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
+                    case None => 
+                      avgActionRuntime = avgActionRuntime + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
+                      containerStandaloneRuntime.get(r.action.name.asString) match{
+                        case Some(e) => logging.info(this, s"<avs_debug> <funcRuntime-1> ok got the avgRuntime to be: ${containerStandaloneRuntime(r.action.name.asString)} "); 
+                        case None => 
+                          addFunctionRuntime(r.action.name.asString)
+                          logging.info(this, s"<avs_debug> <funcRuntime-2> ok got the avgRuntime to be: ${containerStandaloneRuntime(r.action.name.asString)} "); 
+                      }
                   }
 
                   logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}"); 
@@ -143,7 +174,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                 // Remove a container and create a new one for the given job
                 ContainerPool
                 // Only free up the amount, that is really needed to free up
-                  .remove(freePool, Math.min(r.action.limits.memory.megabytes, memoryConsumptionOf(freePool)).MB)
+                  .remove(freePool, Math.min(r.action.limits.memory.megabytes,memoryConsumptionOf(freePool)).MB) //avs
                   .map(removeContainer)
                   // If the list had at least one entry, enough containers were removed to start the new container. After
                   // removing the containers, we are not interested anymore in the containers that have been removed.
@@ -251,7 +282,15 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         freePool = freePool - sender()
       }
       //avs --begin
-      allContainersOfAnAction = allContainersOfAnAction + (warmData.action.name.asString -> warmData.container)
+      // WARNING: Pending, removing the member when container is removed.
+      allContainersOfAnAction.get(warmData.action.name.asString) match {
+        case Some(e) => 
+          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is present in allContainersOfAnAction ")
+          allContainersOfAnAction(warmData.action.name.asString) += warmData.container;
+        case _ => 
+          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is NOT present in allContainersOfAnAction ")
+          allContainersOfAnAction = allContainersOfAnAction + (warmData.action.name.asString -> ListBuffer[Container](warmData.container))
+      }
       // avs --end
 
     // Container is prewarmed and ready to take work
@@ -284,37 +323,39 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       busyPool = busyPool - sender()
 
     //avs --begin
-    //case updateStats(actionName: String,runtime: Long) => 
-    case updateStats(actionName: String,runtime: Long) => 
-      /*if(avgActionRuntime.contains(actionName)) {
-        avgActionRuntime(actionName)._1 = (avgActionRuntime(actionName)._1+runtime)
-        avgActionRuntime(actionName)._2 = (avgActionRuntime(actionName)._2+1)
-        logging.info(this, s"<avs_debug> 1. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}"); 
-        if(allContainersOfAnAction.contains(actionName)){
-          val containerName = allContainersOfAnAction(actionName);
-          containerName.updateCpuShares() 
-        }
-      }else{
-        avgActionRuntime = avgActionRuntime + (actionName-> MutableTriplet(runtime,1)) 
-        logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}"); 
-      }*/
-
+    //case UpdateStats(actionName: String,runtime: Long) => 
+    case UpdateStats(actionName: String,runtime: Long) => 
     avgActionRuntime.get(actionName) match {
       case Some(e) => 
           avgActionRuntime(actionName)._1+=runtime
           avgActionRuntime(actionName)._2+=1
           val transid: TransactionId = avgActionRuntime(actionName)._3
-          //logging.info(this, s"<avs_debug> 1. updateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
-          /*if(allContainersOfAnAction.contains(actionName)){
-            val containerName = allContainersOfAnAction(actionName);
+          logging.info(this, s"<avs_debug> 1. UpdateStats for action ${actionName} and the runtime is ${runtime} runningSum: ${avgActionRuntime(actionName)._1} and count: ${avgActionRuntime(actionName)._2}");         
+          if( runtime > (1.2*containerStandaloneRuntime(actionName)) ){
+            logging.info(this, s"<avs_debug> <shouldUpdate> runtime is ${runtime} which is more than 20% of ${containerStandaloneRuntime(actionName)} ")
+          }
+          // should move this to the above if-statement.
+          if(allContainersOfAnAction.contains(actionName)){
+            val firstContainer = allContainersOfAnAction(actionName)(0); // since the container is present, I am assuming it is --safe-- to access 0th item.
             logging.info(this, s"<avs_debug> calling updateFor container... ")
-            containerName.updateCpuShares(transid,768) 
+            firstContainer.updateCpuShares(transid,768) 
             logging.info(this, s"<avs_debug> DONE with calling updateFor container... ")
-          } */         
+          }          
       case None => 
-          //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
-          logging.info(this, s"<avs_debug> 2. updateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly!");         
-    }      
+            //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
+            logging.info(this, s"<avs_debug> 2. UpdateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly!");         
+
+    }  
+        
+    case RemoveContTracking(container: Container, actionName: String) => 
+      allContainersOfAnAction.get(actionName) match {
+        case Some(e) => 
+          logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} is present in allContainersOfAnAction ")
+          allContainersOfAnAction(actionName)-= container;
+        case _ => 
+          logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} is NOT present in allContainersOfAnAction. Isn't that spooky yo? ")
+      }        
+
     //avs --end
   }
 
@@ -362,9 +403,11 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
 
   /** Removes a container and updates state accordingly. */
   def removeContainer(toDelete: ActorRef) = {
+    logging.info(this, s"<avs_debug> <remove> going to remove some containers yo!")
     toDelete ! Remove
     freePool = freePool - toDelete
     busyPool = busyPool - toDelete
+
   }
 
   /**
@@ -451,7 +494,12 @@ object ContainerPool {
       case (ref, w: WarmedData) if w.activeActivationCount == 0 =>
         ref -> w
     }
-
+/*
+    toDelete.foreach{ curActor => 
+      val curData = freepool.get(curActor).getOrElse(busyPool.get(curActor))
+      logging.info(this, s"<avs_debug> 1. actionName: ${curData.action.name.asString} is present in freepool and is being removed..")
+    }
+*/
     if (memory > 0.B && freeContainers.nonEmpty && memoryConsumptionOf(freeContainers) >= memory.toMB) {
       // Remove the oldest container if:
       // - there is more memory required
@@ -460,7 +508,7 @@ object ContainerPool {
       val (ref, data) = freeContainers.minBy(_._2.lastUsed)
       // Catch exception if remaining memory will be negative
       val remainingMemory = Try(memory - data.memoryLimit).getOrElse(0.B)
-      remove(freeContainers - ref, remainingMemory, toRemove ++ List(ref))
+      remove(freeContainers - ref, remainingMemory,toRemove ++ List(ref))
     } else {
       // If this is the first call: All containers are in use currently, or there is more memory needed than
       // containers can be removed.

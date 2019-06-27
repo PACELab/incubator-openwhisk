@@ -164,8 +164,7 @@ class InvokerReactive(
         case Success(_) =>
           logging.info(
             this,
-            //s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId}")
-            s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId} and it took ${activationResult.duration} milliseconds") //avs
+            s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId}")
       }
     }
     
