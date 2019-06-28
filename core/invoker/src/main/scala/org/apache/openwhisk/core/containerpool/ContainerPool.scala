@@ -49,7 +49,7 @@ class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double,private
   private var updateCount_Flag: Boolean = false;
 
   private var latencyThreshold : Double  = 1.10;
-  private var numCpuSharesUpdate_Threshold : Int = 1;
+  private var numCpuSharesUpdate_Threshold : Int = 5;
   private var maxCpuShares: Int = 512;
 
 
@@ -73,7 +73,7 @@ class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double,private
       
       logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}")  
       // all hell will break loose if multiple containers of the same type call this at the same time!
-        var curNumConts = 1; //if(numContainerTracked()!=0) numContainerTracked() else 1;
+        var curNumConts = if(numContainerTracked()!=0) numContainerTracked() else 1;
         if( (curCpuSharesUsed==0) || (curCpuSharesUsed/(curNumConts)>=numCpuSharesUpdate_Threshold)){
 
           if(curCpuShares<maxCpuShares){
