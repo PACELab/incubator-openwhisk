@@ -180,15 +180,6 @@ case object RunCompleted
 case class UpdateStats(actionName: String,runtime: Long) //avs
 case class RemoveContTracking(container: Container, actionName: String) //avs
 
-/*
-class trackFunctionStats(private var actionName: String, private val curId: TransactionId){
-  private var cumulRuntime: Long = 0;
-  private var numInvocations: Long = 0;
-  private var curCpuShares: Int = 0;
-  private var allCpuShares: ListBuffer[Int] = new mutable.ListBuffer[Int];
-
-}
-*/
 /**
  * A proxy that wraps a Container. It is used to keep track of the lifecycle
  * of a container and to guarantee a contract between the client of the container
@@ -270,7 +261,7 @@ class ContainerProxy(
       activeCount += 1
       //logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse} and numActivationsServed: ${numActivationsServed}"); //avs
       //val sendCpuShares =  if(job.action.name.name == "imageResizing_v1") 256 else (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //if (memory.toMB > 128) 512 else 512
-      val sendCpuShares =  (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB));
+      val sendCpuShares = (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB));
 
       //val sendCpuShares =  (4*poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //avs
       // create a new container

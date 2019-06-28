@@ -38,6 +38,45 @@ case class WorkerData(data: ContainerData, state: WorkerState)
 case class MutableTriplet[A,B,C](var _1: A, var _2: B, var _3: C) {} //avs
 //implicit def doublet_to_tuple[A,B](db: MutableTriplet[A,B]) = (db._1, db._2)
 
+// avs --begin
+class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double ,private val curId: TransactionId,private val logging: AkkaLogging){
+  private var cumulRuntime: Long = 0;
+  private var numInvocations: Long = 0;
+  private var curCpuShares: Int = 0;
+  private var allCpuShares: ListBuffer[Int] = new mutable.ListBuffer[Int];
+  private var myContainers: ListBuffer[Container] =  new ListBuffer[Container]();
+
+  def dummyCall(): Unit = {
+    logging.info(this, s"<avs_debug> <TrackFunctionStats> <dummyCall> for action: ${actionName} ")
+  }
+
+  def addRuntime(curRuntime: Long): Unit = {  
+    cumulRuntime+= curRuntime
+    numInvocations+=1
+    logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
+    if(curRuntime> (1.20 * myStandaloneRuntime) ){
+      logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}")
+    }
+  }
+
+  def addContainer(container: Container): Unit ={
+    logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} adding a container")
+    myContainers+= container;
+  }
+
+  def removeContainer(container: Container): Unit = {
+    logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} removing a container")
+    myContainers-= container;
+  }
+
+  def numContainerTracked(container: Container): Int={
+    logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} #containers are ${myContainers.size}")
+    myContainers.size
+  }
+
+}
+// avs --end
+
 /**
  * A pool managing containers to run actions on.
  *
@@ -70,8 +109,9 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   var freePool = immutable.Map.empty[ActorRef, ContainerData]
   var busyPool = immutable.Map.empty[ActorRef, ContainerData]
   var prewarmedPool = immutable.Map.empty[ActorRef, ContainerData]
-  var avgActionRuntime = immutable.Map.empty[String,MutableTriplet[Long,Int,TransactionId]] //avs
-  var allContainersOfAnAction = mutable.Map.empty[String,ListBuffer[Container]] //avs
+  //var avgActionRuntime = immutable.Map.empty[String,MutableTriplet[Long,Int,TransactionId]] //avs
+  var avgActionRuntime = immutable.Map.empty[String,TrackFunctionStats] //avs
+  //var allContainersOfAnAction = mutable.Map.empty[String,ListBuffer[Container]] //avs
   var containerStandaloneRuntime = immutable.Map.empty[String,Double] //avs
   var canUseCore = -1; //avs  
 
@@ -151,6 +191,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                   
                   // avs --begin
                   canUseCore = ((canUseCore+1)%4); 
+                  /*
                   avgActionRuntime.get(r.action.name.asString) match {
                     case Some(e) => avgActionRuntime(r.action.name.asString)._1+=0 // dummy operation
                     case None => 
@@ -161,8 +202,23 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                           addFunctionRuntime(r.action.name.asString)
                           logging.info(this, s"<avs_debug> <funcRuntime-2> ok got the avgRuntime to be: ${containerStandaloneRuntime(r.action.name.asString)} "); 
                       }
-                  }
+                  }*/
 
+                  avgActionRuntime.get(r.action.name.asString) match {
+                    case Some(e) => avgActionRuntime(r.action.name.asString).dummyCall() // dummy operation
+                    case None => 
+                      //avgActionRuntime = avgActionRuntime + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
+                      containerStandaloneRuntime.get(r.action.name.asString) match{
+                        case Some(e) => logging.info(this, s"<avs_debug> <funcRuntime-1> ok got the avgRuntime to be: ${containerStandaloneRuntime(r.action.name.asString)} and e: ${e} "); 
+                        case None => 
+                          addFunctionRuntime(r.action.name.asString)
+                          logging.info(this, s"<avs_debug> <funcRuntime-2> ok got the avgRuntime to be: ${containerStandaloneRuntime(r.action.name.asString)} "); 
+                      }
+
+                      val myStandAloneRuntime = containerStandaloneRuntime(r.action.name.asString); // would have added it above, so it must be ok to access it here.
+                      avgActionRuntime = avgActionRuntime + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,r.msg.transid,logging) )
+
+                  }
                   logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}"); 
                   r.coreToUse = canUseCore 
                   // avs --end
@@ -283,13 +339,36 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       }
       //avs --begin
       // WARNING: Pending, removing the member when container is removed.
+      /*
       allContainersOfAnAction.get(warmData.action.name.asString) match {
         case Some(e) => 
-          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is present in allContainersOfAnAction ")
-          allContainersOfAnAction(warmData.action.name.asString) += warmData.container;
+          allContainersOfAnAction(warmData.action.name.asString)+= warmData.container;
+          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is present in allContainersOfAnAction and it's size is ${allContainersOfAnAction(warmData.action.name.asString).size}")
         case _ => 
-          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is NOT present in allContainersOfAnAction ")
           allContainersOfAnAction = allContainersOfAnAction + (warmData.action.name.asString -> ListBuffer[Container](warmData.container))
+          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is NOT present in allContainersOfAnAction and it's size is ${allContainersOfAnAction(warmData.action.name.asString).size}")
+      } */
+
+      avgActionRuntime.get(warmData.action.name.asString) match {
+        case Some(e) => 
+          logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in avgActionRuntime and a new container is being added to it. ")
+          avgActionRuntime(warmData.action.name.asString).addContainer(warmData.container) 
+
+        case None => 
+          logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is NOT present in avgActionRuntime and a new container is NOT being added to it. HANDLE it!")
+          //avgActionRuntime = avgActionRuntime + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
+          /*containerStandaloneRuntime.get(warmData.action.name.asString) match{
+            case Some(e) => logging.info(this, s"<avs_debug> <InNeedWork> <funcRuntime-1> ok got the avgRuntime to be: ${containerStandaloneRuntime(warmData.action.name.asString)} and e: ${e} "); 
+            case None => 
+              addFunctionRuntime(warmData.action.name.asString)
+              logging.info(this, s"<avs_debug> <InNeedWork> <funcRuntime-2> ok got the avgRuntime to be: ${containerStandaloneRuntime(warmData.action.name.asString)} "); 
+          }
+
+          val myStandAloneRuntime = containerStandaloneRuntime(warmData.action.name.asString); // would have added it above, so it must be ok to access it here.
+          avgActionRuntime = avgActionRuntime + (warmData.action.name.asString -> new TrackFunctionStats(warmData.action.name.asString,myStandAloneRuntime,warmData.msg.transid,logging) )
+          
+          logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} was NOT present in avgActionRuntime and a new container is being added to it. ")
+          avgActionRuntime(warmData.action.name.asString).addContainer(warmData.container) */
       }
       // avs --end
 
@@ -325,7 +404,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     //avs --begin
     //case UpdateStats(actionName: String,runtime: Long) => 
     case UpdateStats(actionName: String,runtime: Long) => 
-    avgActionRuntime.get(actionName) match {
+    /*avgActionRuntime.get(actionName) match {
       case Some(e) => 
           avgActionRuntime(actionName)._1+=runtime
           avgActionRuntime(actionName)._2+=1
@@ -345,16 +424,36 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
             //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
             logging.info(this, s"<avs_debug> 2. UpdateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly!");         
 
-    }  
-        
+    } */
+
+    avgActionRuntime.get(actionName) match {
+      case Some(e) => 
+          avgActionRuntime(actionName).addRuntime(runtime)         
+      case None => 
+            //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
+            logging.info(this, s"<avs_debug> 2. UpdateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly!");         
+
+    }     
+
     case RemoveContTracking(container: Container, actionName: String) => 
+      /*
       allContainersOfAnAction.get(actionName) match {
         case Some(e) => 
           logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} is present in allContainersOfAnAction ")
           allContainersOfAnAction(actionName)-= container;
         case _ => 
           logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} is NOT present in allContainersOfAnAction. Isn't that spooky yo? ")
-      }        
+      } */       
+
+      avgActionRuntime.get(actionName) match {
+        case Some(e) => 
+          logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} is present in avgActionRuntime and a container is being removed. ")
+          avgActionRuntime(actionName).removeContainer(container) 
+
+        case None =>                    
+          logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} was NOT present in avgActionRuntime and hence nothing is being done ")
+
+      }      
 
     //avs --end
   }
