@@ -45,7 +45,8 @@ class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double,private
   //private var curCpuShares: Int = 0;
   private var curCpuSharesUsed: Int = 0;
   private var allCpuShares: ListBuffer[Int] = new mutable.ListBuffer[Int];
-  private var myContainers: ListBuffer[Container] =  new ListBuffer[Container]();
+  //private var myContainers: ListBuffer[Container] =  new ListBuffer[Container]();
+  private var myContainers = mutable.Map.empty[Container, Int]
   private var updateCount_Flag: Boolean = false;
 
   private var latencyThreshold : Double  = 1.10;
@@ -61,8 +62,10 @@ class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double,private
   }
 
   // Pending:
-  // Updating curCpuSharesUsed when a container is added or removed.
+  // Should use average to trigger?
+  // Updating curCpuSharesUsed when a container is removed (done).
   // Adding some sort of lock so that only one container will trigger the cpuSharesUpdate. However, should be cautious to ensure that other containers wont be wrecked!
+  //    Answer: Is this really an issue with Actors (for now, assuming that each call (from container) to Actor (c-pool) will be eventually run and there won't be race-conditions as such. Should read up on Actors and revisit it later)  
   // Should also make any new container to use the "curCpuShares"
 
   def checkCpuShares(curRuntime: Long): Unit = {
@@ -71,10 +74,11 @@ class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double,private
 
     if(curRuntime> (latencyThreshold * myStandaloneRuntime) ){
       
-      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}")  
+      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}; cumulRuntime: ${cumulRuntime} and #invocations: ${numInvocations}")  
       // all hell will break loose if multiple containers of the same type call this at the same time!
         var curNumConts = if(numContainerTracked()!=0) numContainerTracked() else 1;
-        if( (curCpuSharesUsed==0) || (curCpuSharesUsed/(curNumConts)>=numCpuSharesUpdate_Threshold)){
+        var avgNumtimeUsed = (curCpuSharesUsed/(curNumConts))
+        if( (curCpuSharesUsed==0) || (avgNumtimeUsed >=numCpuSharesUpdate_Threshold) ){
 
           if(curCpuShares<maxCpuShares){
             var tempCpuShares = curCpuShares*2;  
@@ -82,41 +86,54 @@ class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double,private
             curCpuShares = tempCpuShares
             allCpuShares+= curCpuShares
 
-            myContainers.foreach{ cont => 
-                logging.info(this, s"<avs_debug> calling updateFor container... ")
-                cont.updateCpuShares(curId,curCpuShares)        
-                logging.info(this, s"<avs_debug> DONE with calling updateFor container... ")
+            myContainers.keys.foreach{ cont => 
+              cont.updateCpuShares(curId,curCpuShares)        
+              // overkill to do it every time, but ensures that will only be updated on actually updating cpuShares
+              updateCount_Flag = true;
+              curCpuSharesUsed = 0;
             }
-            updateCount_Flag = true;
           }
           else{
             logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curCpuShares: ${curCpuShares} is atleast as big as the max-cpu-shares: ${maxCpuShares}. NOT going to UPDATE the cpushares")  
-              curCpuSharesUsed = 0;
+            curCpuSharesUsed = 0;
           }
         }else{
-          logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across {curNumConts}. Waiting for it to be used ${numCpuSharesUpdate_Threshold} on an average before next round of updates")            
-
+          logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across ${curNumConts} and it has been used on average ${avgNumtimeUsed}. Waiting for it to be used ${numCpuSharesUpdate_Threshold} on an average before next round of updates")            
       }
     }else{
-      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} and curCpuSharesUsed")  
+      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} and curCpuSharesUsed: ${curCpuSharesUsed}")  
     }
   }
 
   def addRuntime(curRuntime: Long): Unit = {  
     cumulRuntime+= curRuntime
     numInvocations+=1
-    logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
+    //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
     checkCpuShares(curRuntime)
   }
 
   def addContainer(container: Container): Unit ={
     logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} adding a container")
-    myContainers+= container;
+    //myContainers+= container;    
+    myContainers.get(container) match {
+      case Some(e) => myContainers(container)+=1
+      case None => myContainers = myContainers + (container -> 1)
+    }
   }
 
   def removeContainer(container: Container): Unit = {
-    logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} removing a container")
-    myContainers-= container;
+    curCpuSharesUsed = if(curCpuSharesUsed>numCpuSharesUpdate_Threshold) curCpuSharesUsed-numCpuSharesUpdate_Threshold else 0    
+    //myContainers-= container;
+    //
+    myContainers.get(container) match {
+      case Some(e) => 
+        logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} removing a container which was used ${myContainers(container)} #times")
+        myContainers = myContainers - container
+      case None => 
+        logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName}. Unfortunately the container wasn't tracked!")
+        //myContainers = myContainers + (container -> 0) // will reset it, but doesnt matter.
+    }
+
   }
 
   def numContainerTracked(): Int={
