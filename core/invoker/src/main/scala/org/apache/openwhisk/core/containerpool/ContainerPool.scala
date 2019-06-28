@@ -39,24 +39,74 @@ case class MutableTriplet[A,B,C](var _1: A, var _2: B, var _3: C) {} //avs
 //implicit def doublet_to_tuple[A,B](db: MutableTriplet[A,B]) = (db._1, db._2)
 
 // avs --begin
-class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double ,private val curId: TransactionId,private val logging: AkkaLogging){
+class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double,private val defaultCpuShares: Int,private val curId: TransactionId,private val logging: AkkaLogging){
   private var cumulRuntime: Long = 0;
   private var numInvocations: Long = 0;
-  private var curCpuShares: Int = 0;
+  //private var curCpuShares: Int = 0;
+  private var curCpuSharesUsed: Int = 0;
   private var allCpuShares: ListBuffer[Int] = new mutable.ListBuffer[Int];
   private var myContainers: ListBuffer[Container] =  new ListBuffer[Container]();
+  private var updateCount_Flag: Boolean = false;
+
+  private var latencyThreshold : Double  = 1.10;
+  private var numCpuSharesUpdate_Threshold : Int = 1;
+  private var maxCpuShares: Int = 512;
+
+
+  private var curCpuShares = defaultCpuShares
+  allCpuShares+= defaultCpuShares // added as part of consturctor.
 
   def dummyCall(): Unit = {
     logging.info(this, s"<avs_debug> <TrackFunctionStats> <dummyCall> for action: ${actionName} ")
+  }
+
+  // Pending:
+  // Updating curCpuSharesUsed when a container is added or removed.
+  // Adding some sort of lock so that only one container will trigger the cpuSharesUpdate. However, should be cautious to ensure that other containers wont be wrecked!
+  // Should also make any new container to use the "curCpuShares"
+
+  def checkCpuShares(curRuntime: Long): Unit = {
+    if(updateCount_Flag)
+      curCpuSharesUsed+=1
+
+    if(curRuntime> (latencyThreshold * myStandaloneRuntime) ){
+      
+      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}")  
+      // all hell will break loose if multiple containers of the same type call this at the same time!
+        var curNumConts = 1; //if(numContainerTracked()!=0) numContainerTracked() else 1;
+        if( (curCpuSharesUsed==0) || (curCpuSharesUsed/(curNumConts)>=numCpuSharesUpdate_Threshold)){
+
+          if(curCpuShares<maxCpuShares){
+            var tempCpuShares = curCpuShares*2;  
+            logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curCpuShares: ${curCpuShares} will be CHANGED to ${tempCpuShares} which we should infer is not as big as the max-cpu-shares: ${maxCpuShares}")  
+            curCpuShares = tempCpuShares
+            allCpuShares+= curCpuShares
+
+            myContainers.foreach{ cont => 
+                logging.info(this, s"<avs_debug> calling updateFor container... ")
+                cont.updateCpuShares(curId,curCpuShares)        
+                logging.info(this, s"<avs_debug> DONE with calling updateFor container... ")
+            }
+            updateCount_Flag = true;
+          }
+          else{
+            logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curCpuShares: ${curCpuShares} is atleast as big as the max-cpu-shares: ${maxCpuShares}. NOT going to UPDATE the cpushares")  
+              curCpuSharesUsed = 0;
+          }
+        }else{
+          logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across {curNumConts}. Waiting for it to be used ${numCpuSharesUpdate_Threshold} on an average before next round of updates")            
+
+      }
+    }else{
+      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} and curCpuSharesUsed")  
+    }
   }
 
   def addRuntime(curRuntime: Long): Unit = {  
     cumulRuntime+= curRuntime
     numInvocations+=1
     logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    if(curRuntime> (1.20 * myStandaloneRuntime) ){
-      logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}")
-    }
+    checkCpuShares(curRuntime)
   }
 
   def addContainer(container: Container): Unit ={
@@ -69,9 +119,10 @@ class TrackFunctionStats(actionName: String, myStandaloneRuntime: Double ,privat
     myContainers-= container;
   }
 
-  def numContainerTracked(container: Container): Int={
+  def numContainerTracked(): Int={
     logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} #containers are ${myContainers.size}")
-    myContainers.size
+    if(myContainers.size==0) 1
+    else myContainers.size
   }
 
 }
@@ -191,19 +242,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                   
                   // avs --begin
                   canUseCore = ((canUseCore+1)%4); 
-                  /*
-                  avgActionRuntime.get(r.action.name.asString) match {
-                    case Some(e) => avgActionRuntime(r.action.name.asString)._1+=0 // dummy operation
-                    case None => 
-                      avgActionRuntime = avgActionRuntime + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
-                      containerStandaloneRuntime.get(r.action.name.asString) match{
-                        case Some(e) => logging.info(this, s"<avs_debug> <funcRuntime-1> ok got the avgRuntime to be: ${containerStandaloneRuntime(r.action.name.asString)} "); 
-                        case None => 
-                          addFunctionRuntime(r.action.name.asString)
-                          logging.info(this, s"<avs_debug> <funcRuntime-2> ok got the avgRuntime to be: ${containerStandaloneRuntime(r.action.name.asString)} "); 
-                      }
-                  }*/
-
                   avgActionRuntime.get(r.action.name.asString) match {
                     case Some(e) => avgActionRuntime(r.action.name.asString).dummyCall() // dummy operation
                     case None => 
@@ -216,7 +254,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                       }
 
                       val myStandAloneRuntime = containerStandaloneRuntime(r.action.name.asString); // would have added it above, so it must be ok to access it here.
-                      avgActionRuntime = avgActionRuntime + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,r.msg.transid,logging) )
+                      val curCpuShares = poolConfig.cpuShare(r.action.limits.memory.megabytes.MB) 
+                      avgActionRuntime = avgActionRuntime + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,curCpuShares,r.msg.transid,logging) )
 
                   }
                   logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}"); 
@@ -339,15 +378,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       }
       //avs --begin
       // WARNING: Pending, removing the member when container is removed.
-      /*
-      allContainersOfAnAction.get(warmData.action.name.asString) match {
-        case Some(e) => 
-          allContainersOfAnAction(warmData.action.name.asString)+= warmData.container;
-          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is present in allContainersOfAnAction and it's size is ${allContainersOfAnAction(warmData.action.name.asString).size}")
-        case _ => 
-          allContainersOfAnAction = allContainersOfAnAction + (warmData.action.name.asString -> ListBuffer[Container](warmData.container))
-          logging.info(this, s"<avs_debug> actionName: ${warmData.action.name.asString} is NOT present in allContainersOfAnAction and it's size is ${allContainersOfAnAction(warmData.action.name.asString).size}")
-      } */
 
       avgActionRuntime.get(warmData.action.name.asString) match {
         case Some(e) => 
@@ -356,19 +386,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
 
         case None => 
           logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is NOT present in avgActionRuntime and a new container is NOT being added to it. HANDLE it!")
-          //avgActionRuntime = avgActionRuntime + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
-          /*containerStandaloneRuntime.get(warmData.action.name.asString) match{
-            case Some(e) => logging.info(this, s"<avs_debug> <InNeedWork> <funcRuntime-1> ok got the avgRuntime to be: ${containerStandaloneRuntime(warmData.action.name.asString)} and e: ${e} "); 
-            case None => 
-              addFunctionRuntime(warmData.action.name.asString)
-              logging.info(this, s"<avs_debug> <InNeedWork> <funcRuntime-2> ok got the avgRuntime to be: ${containerStandaloneRuntime(warmData.action.name.asString)} "); 
-          }
-
-          val myStandAloneRuntime = containerStandaloneRuntime(warmData.action.name.asString); // would have added it above, so it must be ok to access it here.
-          avgActionRuntime = avgActionRuntime + (warmData.action.name.asString -> new TrackFunctionStats(warmData.action.name.asString,myStandAloneRuntime,warmData.msg.transid,logging) )
-          
-          logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} was NOT present in avgActionRuntime and a new container is being added to it. ")
-          avgActionRuntime(warmData.action.name.asString).addContainer(warmData.container) */
       }
       // avs --end
 
@@ -436,14 +453,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     }     
 
     case RemoveContTracking(container: Container, actionName: String) => 
-      /*
-      allContainersOfAnAction.get(actionName) match {
-        case Some(e) => 
-          logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} is present in allContainersOfAnAction ")
-          allContainersOfAnAction(actionName)-= container;
-        case _ => 
-          logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} is NOT present in allContainersOfAnAction. Isn't that spooky yo? ")
-      } */       
 
       avgActionRuntime.get(actionName) match {
         case Some(e) => 
@@ -593,12 +602,7 @@ object ContainerPool {
       case (ref, w: WarmedData) if w.activeActivationCount == 0 =>
         ref -> w
     }
-/*
-    toDelete.foreach{ curActor => 
-      val curData = freepool.get(curActor).getOrElse(busyPool.get(curActor))
-      logging.info(this, s"<avs_debug> 1. actionName: ${curData.action.name.asString} is present in freepool and is being removed..")
-    }
-*/
+
     if (memory > 0.B && freeContainers.nonEmpty && memoryConsumptionOf(freeContainers) >= memory.toMB) {
       // Remove the oldest container if:
       // - there is more memory required
