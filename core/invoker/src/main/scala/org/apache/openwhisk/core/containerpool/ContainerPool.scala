@@ -269,6 +269,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->6350.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->18000.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1350.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0.0)
   // avs --end
   prewarmConfig.foreach { config =>
     logging.info(this, s"pre-warming ${config.count} ${config.exec.kind} ${config.memoryLimit.toString}")(
@@ -300,6 +301,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     }else if (functionName == "euler3d_cpu_v1"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000.0)  
     }else if (functionName == "servingCNN_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
+    }else if (functionName == "invokerHealthTestAction0"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
     }
     

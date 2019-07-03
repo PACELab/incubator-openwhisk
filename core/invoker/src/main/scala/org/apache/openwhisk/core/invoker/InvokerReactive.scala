@@ -215,7 +215,7 @@ class InvokerReactive(
         // active-ack.
 
         implicit val transid: TransactionId = msg.transid
-        //logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 1. Start"); //avs
+        logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 1. Start"); //avs
         //set trace context to continue tracing
         WhiskTracerProvider.tracer.setTraceContext(transid, msg.traceContext)
 
@@ -227,6 +227,7 @@ class InvokerReactive(
           val subject = msg.user.subject
           var coreToUse = -1 // avs
 
+          logging.info(this, s"<avs_debug> action: ${actionid.id} subject: $subject activId: ${msg.activationId}")
           logging.debug(this, s"${actionid.id} $subject ${msg.activationId}")
 
           // caching is enabled since actions have revision id and an updated
@@ -234,16 +235,17 @@ class InvokerReactive(
           // if the doc revision is missing, then bypass cache
           if (actionid.rev == DocRevision.empty) logging.warn(this, s"revision was not provided for ${actionid.id}")
 
-          //logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 2. CheckingForExecutable"); //avs
-
+          logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 2. CheckingForExecutable"); //avs
           WhiskAction
             .get(entityStore, actionid.id, actionid.rev, fromCache = actionid.rev != DocRevision.empty)
             .flatMap { action =>
               action.toExecutableWhiskAction match {
                 case Some(executable) =>
+                  logging.info(this, s"<avs_debug> WA.GET-1 found an executable "); //avs
                   pool ! Run(executable, msg,coreToUse) // avs : added coreToUse
                   Future.successful(())
                 case None =>
+                  logging.info(this, s"<avs_debug> WA.GET-2 DIDNOT find an executable "); //avs
                   logging.error(this, s"non-executable action reached the invoker ${action.fullyQualifiedName(false)}")
                   Future.failed(new IllegalStateException("non-executable action reached the invoker"))
               }
@@ -253,24 +255,31 @@ class InvokerReactive(
                 // If the action cannot be found, the user has concurrently deleted it,
                 // making this an application error. All other errors are considered system
                 // errors and should cause the invoker to be considered unhealthy.
+                logging.info(this, s"<avs_debug> WA.GET-3 RecoverWith-0 "); //avs
                 val response = t match {
                   case _: NoDocumentException =>
+                    logging.info(this, s"<avs_debug> WA.GET-3 RecoverWith-1 NoDocumentException "); //avs
                     ActivationResponse.applicationError(Messages.actionRemovedWhileInvoking)
                   case _: DocumentTypeMismatchException | _: DocumentUnreadable =>
+                    logging.info(this, s"<avs_debug> WA.GET-3 RecoverWith-1 DocumentTypeMismatchException or DocumentUnreadable"); //avs
                     ActivationResponse.whiskError(Messages.actionMismatchWhileInvoking)
                   case _ =>
+                    logging.info(this, s"<avs_debug> WA.GET-3 RecoverWith-1 NoneCase"); //avs
                     ActivationResponse.whiskError(Messages.actionFetchErrorWhileInvoking)
                 }
 
                 val context = UserContext(msg.user)
                 val activation = generateFallbackActivation(msg, response)
+                logging.info(this, s"<avs_debug> WA.GET-END activationFeed Processed"); //avs
                 activationFeed ! MessageFeed.Processed
+                logging.info(this, s"<avs_debug> WA.GET-END Ack"); //avs
                 ack(msg.transid, activation, msg.blocking, msg.rootControllerIndex, msg.user.namespace.uuid, true)
+                logging.info(this, s"<avs_debug> WA.GET-END Store"); //avs
                 store(msg.transid, activation, context)
                 Future.successful(())
             }
         } else {
-          //logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 3. NamespaceBlacklisted"); //avs
+          logging.info(this, s"<avs_debug> <InvokerReactive:processActivationMessage> 3. NamespaceBlacklisted"); //avs
           // Iff the current namespace is blacklisted, an active-ack is only produced to keep the loadbalancer protocol
           // Due to the protective nature of the blacklist, a database entry is not written.
           activationFeed ! MessageFeed.Processed
