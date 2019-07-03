@@ -356,7 +356,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                       avgActionRuntime = avgActionRuntime + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,curCpuShares,r.msg.transid,logging,totalCpuShares,cpuSharesPool))//,cpuSharesCheck)
                       
                   }
-                  logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}. My memory reqmt is ${r.action.limits.memory.megabytes.MB}"); 
+                  val inferredLimit = r.action.limits.inferredVal
+                  logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}. My memory reqmt is ${r.action.limits.memory.megabytes.MB} and inferredLimit: ${inferredLimit}"); 
                   r.coreToUse = canUseCore 
                   // avs --end
                   takePrewarmContainer(r.action)

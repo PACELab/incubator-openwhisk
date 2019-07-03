@@ -206,6 +206,7 @@ object ConfigKeys {
   val timeLimit = "whisk.time-limit"
   val logLimit = "whisk.log-limit"
   val concurrencyLimit = "whisk.concurrency-limit"
+  val inferredLimit = "whisk.inferred-limit" //avs
   val activation = "whisk.activation"
   val userEvents = "whisk.user-events"
 

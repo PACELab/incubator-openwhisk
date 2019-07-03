@@ -71,6 +71,7 @@ object Invoker {
     implicit val logger = new AkkaLogging(akka.event.Logging.getLogger(actorSystem, this))
     val poolConfig: ContainerPoolConfig = loadConfigOrThrow[ContainerPoolConfig](ConfigKeys.containerPool)
     val limitConfig: ConcurrencyLimitConfig = loadConfigOrThrow[ConcurrencyLimitConfig](ConfigKeys.concurrencyLimit)
+    //val inferredLimitConfig: InferredLimitConfig = loadConfigOrThrow[InferredLimitConfig](ConfigKeys.inferredLimit)
 
     // Prepare Kamon shutdown
     CoordinatedShutdown(actorSystem).addTask(CoordinatedShutdown.PhaseActorSystemTerminate, "shutdownKamon") { () =>
