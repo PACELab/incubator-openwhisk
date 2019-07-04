@@ -327,5 +327,5 @@
       "{{ controller.confdir }}/{{ controller_name }}/{{ controller.ssl.cert }}"
   register: result
   until: result.status == 200
-  retries: 12
+  retries: 20
   delay: 5
