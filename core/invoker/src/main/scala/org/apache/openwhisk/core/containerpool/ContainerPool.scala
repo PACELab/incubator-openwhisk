@@ -39,21 +39,40 @@ case class MutableTriplet[A,B,C](var _1: A, var _2: B, var _3: C) {} //avs
 //implicit def doublet_to_tuple[A,B](db: MutableTriplet[A,B]) = (db._1, db._2)
 
 // avs --begin
+
+class funcConfigTracking(
+  var actionName: String, 
+  var actionType: String, // ET, MP
+  var myContData: ContainerData,
+  val curId: TransactionId, 
+  private val defaultCpuShares: Int, 
+){
+  private var curCpuShares = defaultCpuShares;
+
+  def getDefaultCpuShares(): Int = {
+    defaultCpuShares
+  }
+  def getCurCpuShares(): Int = {
+    curCpuShares
+  }
+  def setCurCpuShares(toSetValue: Int): Unit = {
+    curCpuShares = toSetValue
+  }
+
+}
+
 class TrackFunctionStats(
   actionName: String, 
   myStandaloneRuntime: Double, 
+  private var myAction: ExecutableWhiskAction,
   private val defaultCpuShares: Int,
   private val curId: TransactionId, 
   private val logging: AkkaLogging,
   private val totalCpuShares: Int,
-  val cpuSharesPool:immutable.Map[ActorRef, Int],
-  //factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int, Int) => Future[Container],
-  //cpuSharesCheck: (Map[ActorRef,Int],Int) => Int
+  //val cpuSharesPool:immutable.Map[ActorRef, Int]
+  val cpuSharesPool:immutable.Map[ActorRef, funcConfigTracking]
   ) {
 
-  //import ContainerPool.cpuSharesConsumptionOf
-  //import ContainerPool.cpuSharesPool
-  //import ContainerPool.getCpuSharesFor
   import ContainerPool.cpuSharesCheck
 
   private var cumulRuntime: Long = 0;
@@ -66,9 +85,10 @@ class TrackFunctionStats(
   private var updateCount_Flag: Boolean = false;
 
   private var latencyThreshold : Double  = 1.10;
-  private var numCpuSharesUpdate_Threshold : Int = 5;
+  private var default_cpuSharesUpdate_Threshold: Int = 3
+  private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold;
   private var maxCpuShares: Int = 512;
-
+  private var waitForFiveIters: Boolean = false;
 
   var curCpuShares = defaultCpuShares
   allCpuShares+= defaultCpuShares // added as part of consturctor.
@@ -77,7 +97,9 @@ class TrackFunctionStats(
     logging.info(this, s"<avs_debug> <TrackFunctionStats> <dummyCall> for action: ${actionName} ")
   }
 
-
+  def getCurCpuShares(): Int = {
+    curCpuShares
+  }
   // Pending:
   // Should use average to trigger?
   // Updating curCpuSharesUsed when a container is removed (done).
@@ -96,7 +118,7 @@ class TrackFunctionStats(
       // all hell will break loose if multiple containers of the same type call this at the same time!
         var curNumConts = if(numContainerTracked()!=0) numContainerTracked() else 1;
         var avgNumtimeUsed = (curCpuSharesUsed/(curNumConts))
-        if( (curCpuSharesUsed==0) || (avgNumtimeUsed >=numCpuSharesUpdate_Threshold) ){
+        if( (curCpuSharesUsed==0) || (avgNumtimeUsed >=curCpuSharesUpdate_Threshold) ){
 
           if(curCpuShares<maxCpuShares){
             var tempCpuShares = curCpuShares*2;  
@@ -116,7 +138,7 @@ class TrackFunctionStats(
             curCpuSharesUsed = 0;
           }
         }else{
-          logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across ${curNumConts} and it has been used on average ${avgNumtimeUsed}. Waiting for it to be used ${numCpuSharesUpdate_Threshold} on an average before next round of updates")            
+          logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across ${curNumConts} and it has been used on average ${avgNumtimeUsed}. Waiting for it to be used ${curCpuSharesUpdate_Threshold} on an average before next round of updates")            
         }
       }else{
       logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} and curCpuSharesUsed: ${curCpuSharesUsed}")  
@@ -133,7 +155,6 @@ class TrackFunctionStats(
     if(updateCount_Flag)
       curCpuSharesUsed+=1
 
-
     if(curRuntime> (latencyThreshold * myStandaloneRuntime) ){
       
       logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}; cumulRuntime: ${cumulRuntime} and #invocations: ${numInvocations}")  
@@ -141,29 +162,49 @@ class TrackFunctionStats(
       // all hell will break loose if multiple containers of the same type call this at the same time!
         var curNumConts = if(numContainerTracked()!=0) numContainerTracked() else 1;
         var avgNumtimeUsed = (curCpuSharesUsed/(curNumConts))
-        if( (curCpuSharesUsed==0) || (avgNumtimeUsed >=numCpuSharesUpdate_Threshold) ){
+        if( (curCpuSharesUsed==0) || (avgNumtimeUsed >=curCpuSharesUpdate_Threshold) ){
 
           if(curCpuShares<maxCpuShares){
             var tempCpuShares = curCpuShares*2;  
+            if(tempCpuShares>maxCpuShares) tempCpuShares = maxCpuShares
             logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> for action: ${actionName} curCpuShares: ${curCpuShares} will be CHANGED to ${tempCpuShares} which we should infer is not as big as the max-cpu-shares: ${maxCpuShares}")  
             curCpuShares = tempCpuShares
             allCpuShares+= curCpuShares
 
-            var couldBeCpuShares = cpuSharesCheck(cpuSharesPool,logging,curCpuShares,totalCpuShares); // currently only checking the cpuSharesPool.
-            logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> response from getCpuSharesFor is ${couldBeCpuShares}")  
+            var couldBeCpuShares = cpuSharesCheck(cpuSharesPool,logging,curCpuShares*curNumConts,totalCpuShares); // currently only checking the cpuSharesPool.
+            if(couldBeCpuShares!=(curCpuShares*curNumConts)){ // ok, we can't update it as much as we thought we could. So, reducing our demand.
+              logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> for action: ${actionName} ok, we can't update it as much as we thought we could (${curCpuShares}). So, reducing our demand. to ${couldBeCpuShares} split among ${curNumConts} (i.e. ${couldBeCpuShares/curNumConts}")                
+              if(curCpuShares == maxCpuShares){
+                waitForFiveIters = true
+              }else{
+                waitForFiveIters = false
+              }
+              curCpuShares = couldBeCpuShares/curNumConts 
+            }else{
+              waitForFiveIters = false
+            }
+
             myContainers.keys.foreach{ cont => 
               cont.updateCpuShares(curId,curCpuShares)        
               // overkill to do it every time, but ensures that will only be updated on actually updating cpuShares
               updateCount_Flag = true;
               curCpuSharesUsed = 0;
+              if(waitForFiveIters){ 
+                curCpuSharesUpdate_Threshold = default_cpuSharesUpdate_Threshold * 10; // backing off, since the system is likely running at it's peak.
+              }else{
+                curCpuSharesUpdate_Threshold = default_cpuSharesUpdate_Threshold;
+              }
+              myAction.limits.inferredVal.curActInferredConfig.mostusedCpuShares = curCpuShares
+              myAction.limits.inferredVal.curActInferredConfig.numTimesUpdated = myAction.limits.inferredVal.curActInferredConfig.numTimesUpdated+1
             }
+            logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> response from getCpuSharesFor is ${couldBeCpuShares} mostusedCpuShares: ${myAction.limits.inferredVal.curActInferredConfig.mostusedCpuShares} numTimesUpdated: ${myAction.limits.inferredVal.curActInferredConfig.numTimesUpdated}") 
           }
           else{
             logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> for action: ${actionName} curCpuShares: ${curCpuShares} is atleast as big as the max-cpu-shares: ${maxCpuShares}. NOT going to UPDATE the cpushares")  
             curCpuSharesUsed = 0;
           }
         }else{
-          logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across ${curNumConts} and it has been used on average ${avgNumtimeUsed}. Waiting for it to be used ${numCpuSharesUpdate_Threshold} on an average before next round of updates")            
+          logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across ${curNumConts} and it has been used on average ${avgNumtimeUsed}. Waiting for it to be used ${curCpuSharesUpdate_Threshold} on an average before next round of updates")            
         }
       }else{
       logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares1> for action: ${actionName} curRuntime: ${curRuntime} and curCpuSharesUsed: ${curCpuSharesUsed}")  
@@ -192,7 +233,7 @@ class TrackFunctionStats(
   }
 
   def removeContainer(container: Container): Unit = {
-    curCpuSharesUsed = if(curCpuSharesUsed>numCpuSharesUpdate_Threshold) curCpuSharesUsed-numCpuSharesUpdate_Threshold else 0    
+    curCpuSharesUsed = if(curCpuSharesUsed>curCpuSharesUpdate_Threshold) curCpuSharesUsed-curCpuSharesUpdate_Threshold else 0    
     myContainers.get(container) match {
       case Some(e) => 
         logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer> for action: ${actionName} removing a container which was used ${myContainers(container)} #times")
@@ -251,9 +292,10 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   //avs --begin
   var avgActionRuntime = immutable.Map.empty[String,TrackFunctionStats] 
   var containerStandaloneRuntime = immutable.Map.empty[String,Double] 
-  var cpuSharesPool = immutable.Map.empty[ActorRef, Int]
+  //var cpuSharesPool = immutable.Map.empty[ActorRef, Int]
+  var cpuSharesPool = immutable.Map.empty[ActorRef, funcConfigTracking]
   var canUseCore = -1; 
-  var totalCpuShares = 4*1024; // WARNING: Should move this to poolConfig and to make it inferrable.
+  var totalCpuShares = 4*512//1024; // WARNING: Should move this to poolConfig and to make it inferrable.
   // avs --end
 
   // If all memory slots are occupied and if there is currently no container to be removed, than the actions will be
@@ -308,6 +350,22 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     
   }
 
+  def getActionType(functionName: String): String ={
+    if(functionName == "imageResizing_v1"){
+      "ET" 
+    }else if (functionName == "rodinia_nn_v1"){
+      "MP" 
+    }else if (functionName == "euler3d_cpu_v1"){
+      "MP"
+    }else if (functionName == "servingCNN_v1"){
+      "ET" 
+    }else{
+      "MP"
+    }/*else if (functionName == "invokerHealthTestAction0"){
+      "ET"
+    }*/    
+  }
+
   def receive: Receive = {
     // A job to run on a container
     //
@@ -353,13 +411,11 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                       val myStandAloneRuntime = containerStandaloneRuntime(r.action.name.asString); // would have added it above, so it must be ok to access it here.
                       var curCpuShares = poolConfig.cpuShare(r.action.limits.memory.megabytes.MB) 
                       curCpuShares = cpuSharesCheck(cpuSharesPool,logging,curCpuShares,totalCpuShares)
-                      avgActionRuntime = avgActionRuntime + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,curCpuShares,r.msg.transid,logging,totalCpuShares,cpuSharesPool))//,cpuSharesCheck)
+                      avgActionRuntime = avgActionRuntime + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,r.action,curCpuShares,r.msg.transid,logging,totalCpuShares,cpuSharesPool))//,cpuSharesCheck)
                       
                   }
                   //val inferredLimit = r.action.limits.inferredVal.maxInferredVal
-                  //r.action.limits.inferredVal.mostusedCpuShares = poolConfig.cpuShare(r.action.limits.memory.megabytes.MB) 
-                  val inferredMostUsedCpuShares = 10 ;//r.action.limits.inferredVal.curActInferredConfig.mostusedCpuShares
-                  logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}. My memory reqmt is ${r.action.limits.memory.megabytes.MB} and inferredMostUsedCpuShares: ${inferredMostUsedCpuShares}"); 
+                  logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and busyPool.size: ${busyPool.size} and actionName: ${r.action.name.asString}. My memory reqmt is ${r.action.limits.memory.megabytes.MB}"); 
                   r.coreToUse = canUseCore 
                   // avs --end
                   takePrewarmContainer(r.action)
@@ -401,11 +457,12 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               }
               busyPool = busyPool + (actor -> newData)
               freePool = freePool - actor
-              cpuSharesPool = cpuSharesPool + (actor->poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)) // avs
+              //cpuSharesPool = cpuSharesPool + (actor->poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)) // avs
+              cpuSharesPool = cpuSharesPool + (actor -> new funcConfigTracking(r.action.name.asString,getActionType(r.action.name.asString),newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))
             } else {
               //update freePool to track counts
               freePool = freePool + (actor -> newData)
-              cpuSharesPool = cpuSharesPool + (actor->poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)) // avs
+              cpuSharesPool = cpuSharesPool + (actor -> new funcConfigTracking(r.action.name.asString,getActionType(r.action.name.asString),newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB))) // avs
             }
             // Remove the action that get's executed now from the buffer and execute the next one afterwards.
             if (isResentFromBuffer) {
@@ -483,10 +540,16 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       // WARNING: Pending, removing the member when container is removed.
 
       avgActionRuntime.get(warmData.action.name.asString) match {
-        case Some(e) => 
+        case Some(curActStats) => 
           logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in avgActionRuntime and a new container is being added to it. ")
-          avgActionRuntime(warmData.action.name.asString).addContainer(warmData.container) 
-
+          curActStats.addContainer(warmData.container) 
+          cpuSharesPool.get(sender()) match{
+            case Some(curContConfig) =>
+              curContConfig.setCurCpuShares(curActStats.getCurCpuShares())
+              logging.info(this, s"<avs_debug> <InNeedWork> <updateConfig> actionName: ${warmData.action.name.asString} and it's cpuShares is ${curActStats.getCurCpuShares()} and cpuShares according to config is ${curContConfig.getCurCpuShares()} ")
+            case None =>
+              logging.info(this, s"<avs_debug> <InNeedWork> <updateConfig> actionName: ${warmData.action.name.asString} this container is not in cpuSharesPool. HANDLE it!! ")              
+          }
         case None => 
           logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is NOT present in avgActionRuntime and a new container is NOT being added to it. HANDLE it!")
       }
@@ -626,22 +689,61 @@ object ContainerPool {
   }
   // avs --begin
   
-  //val cpuSharesCheck[ActorRef] = (pool: Map[ActorRef,Int], toUpdateCpuShares: Int)=>{
-  //private val store = (tid: TransactionId, activation: WhiskActivation, context: UserContext) => {
-  protected[containerpool] def cpuSharesCheck[ActorRef] = (pool: Map[ActorRef,Int],logging: AkkaLogging,toUpdateCpuShares: Int,totalCpuShares: Int) => { 
-  //def getCpuSharesFor[A](pool: Map[A,Int], toUpdateCpuShares: Int): Int = {
+  //protected[containerpool] def cpuSharesCheck[ActorRef] = (pool: Map[ActorRef,Int],logging: AkkaLogging,toUpdateCpuShares: Int,totalCpuShares: Int) => { 
+  protected[containerpool] def cpuSharesCheck[A] = (pool: Map[A,funcConfigTracking],logging: AkkaLogging,toUpdateCpuShares: Int,totalCpuShares: Int) => { 
     var cur_poolCpuSharesConsumption = cpuSharesConsumptionOf(pool)
-    var tempCpuShares = 0 
-    pool.keys.foreach{curCont => 
-      logging.info(this, s"<avs_debug><cpuSharesCheck> Checking for getCpuSharesFor -- curCpuShares: ${pool(curCont)} and cumulSum: ${tempCpuShares}")
-      tempCpuShares+=pool(curCont)
+    var tempCpuShares = 0
+    var resUpdatedShares = toUpdateCpuShares 
+
+    pool.keys.foreach{ curCont => 
+      logging.info(this, s"<avs_debug><cpuSharesCheck> Checking for getCpuSharesFor -- curCpuShares: ${pool(curCont).getCurCpuShares()} and cumulSum: ${tempCpuShares}")
+      tempCpuShares+=pool(curCont).getCurCpuShares()
     }
-    logging.info(this, s"<avs_debug><cpuSharesCheck> Checking for getCpuSharesFor -- i.e. (${cur_poolCpuSharesConsumption} + ${toUpdateCpuShares}) <= (${totalCpuShares}). Also tempCpuShares: ${tempCpuShares}") 
-    cpuSharesConsumptionOf(pool) + toUpdateCpuShares <= totalCpuShares
-    toUpdateCpuShares
+    
+    var canUpdate: Boolean = cpuSharesConsumptionOf(pool) + resUpdatedShares <= totalCpuShares    
+
+    if(canUpdate){
+      logging.info(this, s"<avs_debug><cpuSharesCheck> 1. Checking for getCpuSharesFor -- i.e. (${cur_poolCpuSharesConsumption} + ${resUpdatedShares}) <= (${totalCpuShares}). Also tempCpuShares: ${tempCpuShares}") 
+      resUpdatedShares
+    }else{
+      var befUpdatingAccumShares = 0
+      var afterUpdatingAccumShares = 0
+      while(!canUpdate){
+        befUpdatingAccumShares = cpuSharesConsumptionOf(pool)
+        logging.info(this, s"<avs_debug><cpuSharesCheck> canUpdate: ${canUpdate} So, will rebalance cpuShares once. pool-cpu-shares: (${cpuSharesConsumptionOf(pool)}, resUpdatedShares: ${resUpdatedShares}) totalCpuShares: (${totalCpuShares})") 
+        rebalanceCpuShares(pool,logging)
+        afterUpdatingAccumShares = cpuSharesConsumptionOf(pool)
+        if(afterUpdatingAccumShares==befUpdatingAccumShares){ // since we cannot reduce shares of others, we will reduce our demands.
+          resUpdatedShares = resUpdatedShares-(32*pool.size)
+        }
+        canUpdate = cpuSharesConsumptionOf(pool) + resUpdatedShares <= totalCpuShares 
+      }
+      logging.info(this, s"<avs_debug><cpuSharesCheck> Done rebalancing cpuShares pool-cpu-shares: (${cpuSharesConsumptionOf(pool)}, resUpdatedShares: ${resUpdatedShares}) totalCpuShares: (${totalCpuShares})")       
+      resUpdatedShares  
+    }    
   }
-  // avs --begin
-  
+
+
+  def rebalanceCpuShares[A](pool: Map[A,funcConfigTracking],logging: AkkaLogging): Unit = {
+    pool.keys.foreach{ curCont => 
+
+      var myConfig: funcConfigTracking = pool(curCont)
+      var updatedCpuShares = myConfig.getCurCpuShares()-32 // WARNING: Should fix this to be a dynamic value.  
+      logging.info(this, s"<avs_debug><rebalanceCpuShares> actName: ${myConfig.actionName} and my type: ${myConfig.actionType} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares}")
+      
+      if(updatedCpuShares >= myConfig.getDefaultCpuShares()){
+        myConfig.myContData.getContainer match {
+          case Some(myContainer) => 
+            logging.info(this, s"<avs_debug><rebalanceCpuShares> Going to update my CPUSHARES. actName: ${myConfig.actionName} and my type: ${myConfig.actionType} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares}")
+            myContainer.updateCpuShares(myConfig.curId,updatedCpuShares)
+            myConfig.setCurCpuShares(updatedCpuShares)
+          case None => 
+            logging.info(this, s"<avs_debug><rebalanceCpuShares> Container NOT FOUND to update my CPUSHARES. actName: ${myConfig.actionName} and my type: ${myConfig.actionType} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares}. HANDLE it!!")
+        }
+      }
+
+    }
+  }
 
   /**
    * Calculate the cpuShares of a given pool.
@@ -649,8 +751,9 @@ object ContainerPool {
    * @param pool The pool with the containers.
    * @return The cpuShares of all containers in the pool
    */
-  protected[containerpool] def cpuSharesConsumptionOf[A](pool: Map[A, Int]): Int = {
-    pool.map(_._2).sum
+  //protected[containerpool] def cpuSharesConsumptionOf[A](pool: Map[A, Int]): Int = {
+  protected[containerpool] def cpuSharesConsumptionOf[A](pool: Map[A, funcConfigTracking]): Int = {
+    pool.map(_._2.getCurCpuShares()).sum
   }  
   // avs --end
 
