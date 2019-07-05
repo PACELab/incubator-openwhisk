@@ -234,6 +234,7 @@ class ContainerProxy(
   // avs --begin
   var numActivationsServed = 0;
   var prevActivationTime : Long = 0;
+  var prevActivationInitTime : Long =0;
   // avs --end
   //keep a separate count to avoid confusion with ContainerState.activeActivationCount that is tracked/modified only in ContainerPool
   var activeCount = 0;
@@ -364,8 +365,10 @@ class ContainerProxy(
     case Event(RunCompleted, data: WarmedData) =>
       activeCount -= 1
       //context.parent ! UpdateStats(numActivationsServed) //avs 
-      context.parent ! UpdateStats(data.action.name.asString,prevActivationTime) //avs 
+      if(prevActivationInitTime == 0) 
+        context.parent ! UpdateStats(data.action.name.asString,prevActivationTime) //avs 
       prevActivationTime = 0;//avs
+      prevActivationInitTime = 0// avs
 
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay
       if (requestWork(data) || activeCount > 0) {
@@ -664,8 +667,9 @@ class ContainerProxy(
 
           // avs --start
           numActivationsServed = numActivationsServed+1; //avs
-          //logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed}"); //avs 
           prevActivationTime = activation.duration getOrElse 0;
+          prevActivationInitTime = activation.annotations.getAs[Long](WhiskActivation.initTimeAnnotation).getOrElse(0) //activation.initTimeAnnotation getOrElse -1
+          logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed} prevActivationInitTime: ${prevActivationInitTime} "); //avs 
           // WARNING: not sure whether this could break it, if there are some errors. 
           // avs --end
 

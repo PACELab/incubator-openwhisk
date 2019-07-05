@@ -51,7 +51,7 @@ protected[core] case class ActionLimits(timeout: TimeLimit = TimeLimit(),
                                         memory: MemoryLimit = MemoryLimit(),
                                         logs: LogLimit = LogLimit(),
                                         concurrency: ConcurrencyLimit = ConcurrencyLimit(),
-                                        inferredVal: InferredLimit = InferredLimit(), //avs
+                                        iVals: InferredLimit = InferredLimit(), //avs
                                       )
     extends Limits {
   override protected[entity] def toJson = ActionLimits.serdes.write(this)
@@ -79,9 +79,9 @@ protected[core] object ActionLimits extends ArgNormalizer[ActionLimits] with Def
       val memory = MemoryLimit.serdes.read(obj.get("memory") getOrElse deserializationError("'memory' is missing"))
       val logs = obj.get("logs") map { LogLimit.serdes.read(_) } getOrElse LogLimit()
       val concurrency = obj.get("concurrency") map { ConcurrencyLimit.serdes.read(_) } getOrElse ConcurrencyLimit()
-      val inferredVal = obj.get("inferredVal") map { InferredLimit.serdes.read(_) } getOrElse InferredLimit()
+      val iVals = obj.get("iVals") map { InferredLimit.serdes.read(_) } getOrElse InferredLimit()
 
-      ActionLimits(time, memory, logs, concurrency,inferredVal)
+      ActionLimits(time, memory, logs, concurrency,iVals)
     }
 
     def write(a: ActionLimits) = helper.write(a)

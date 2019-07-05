@@ -43,7 +43,7 @@ case class ActionLimitsOption(timeout: Option[TimeLimit],
                               memory: Option[MemoryLimit],
                               logs: Option[LogLimit],
                               concurrency: Option[ConcurrencyLimit],
-                              inferredVal: Option[InferredLimit]
+                              iVals: Option[InferredLimit]
                               )
 
 /**
