@@ -62,7 +62,6 @@ class DockerContainerFactory(instance: InvokerInstanceId,
                                coreToUse: Int,//avs
                                cpuShares: Int)(implicit config: WhiskConfig, logging: Logging): Future[Container] = {
 
-    logging.info(this, s"<avs_debug> <dockerContainerFactory:createContainer>"); //avs
     DockerContainer.create(
       tid,
       image =

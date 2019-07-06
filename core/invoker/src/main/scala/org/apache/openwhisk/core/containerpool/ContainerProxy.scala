@@ -518,7 +518,7 @@ class ContainerProxy(
   def destroyContainer(container: Container, actionName: String) = {
   //def destroyContainer(container: Container) = {
     //avs --begin
-    logging.info(this, s"<avs_debug> 1. about to destroyTheContainer for function");         
+    //logging.info(this, s"<avs_debug> 1. about to destroyTheContainer for function");         
     context.parent ! RemoveContTracking(container,actionName)  // RemoveContTracking(container: Container, actionName: String)
     // avs --end
     if (!rescheduleJob) {
@@ -669,7 +669,7 @@ class ContainerProxy(
           numActivationsServed = numActivationsServed+1; //avs
           prevActivationTime = activation.duration getOrElse 0;
           prevActivationInitTime = activation.annotations.getAs[Long](WhiskActivation.initTimeAnnotation).getOrElse(0) //activation.initTimeAnnotation getOrElse -1
-          logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed} prevActivationInitTime: ${prevActivationInitTime} "); //avs 
+          //logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed} prevActivationInitTime: ${prevActivationInitTime} "); //avs 
           // WARNING: not sure whether this could break it, if there are some errors. 
           // avs --end
 
