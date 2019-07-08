@@ -94,7 +94,7 @@ class TrackFunctionStats(
 
   private var myActionType = getActionType(actionName)
   private var perIterIncrement = if(myActionType=="ET") 128 else 64
-  private var maxCpuShares = if(myActionType=="ET") 1024 else 256
+  private var maxCpuShares = if(myActionType=="ET") 512 else 256
 
   private var trackSharesUsed = mutable.Map.empty[Int,Int] // <num-shares>,<num-times-used>
   trackSharesUsed = trackSharesUsed + (defaultCpuShares -> 0)
@@ -111,7 +111,7 @@ class TrackFunctionStats(
     curCpuShares
   }
   // Pending:
-  // Should use average to trigger?
+  // Should use average/window to trigger?
   // Updating curCpuSharesUsed when a container is removed (done).
   // Adding some sort of lock so that only one container will trigger the cpuSharesUpdate. However, should be cautious to ensure that other containers wont be wrecked!
   //    Answer: Is this really an issue with Actors (for now, assuming that each call (from container) to Actor (c-pool) will be eventually run and there won't be race-conditions as such. Should read up on Actors and revisit it later)  
@@ -179,7 +179,6 @@ class TrackFunctionStats(
             myAction.limits.iVals.myInferredConfig.numTimesUpdated = myAction.limits.iVals.myInferredConfig.numTimesUpdated+1            
             logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} update curShares: ${curCpuShares} and couldBeCpuShares: ${couldBeCpuShares} and tempCpuShares: ${tempCpuShares}. shouldEaseup: ${shouldEaseup} and on average will wait for ${curCpuSharesUpdate_Threshold} mostusedCpuShares: ${myAction.limits.iVals.myInferredConfig.mostusedCpuShares}, numTimesUpdated: ${myAction.limits.iVals.myInferredConfig.numTimesUpdated}")                
           }
-
           //logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> response from getCpuSharesFor is ${couldBeCpuShares} mostusedCpuShares: ${myAction.limits.iVals.myInferredConfig.mostusedCpuShares} numTimesUpdated: ${myAction.limits.iVals.myInferredConfig.numTimesUpdated}") 
         }
         else{
@@ -198,7 +197,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    checkCpuShares(curRuntime)
+    //checkCpuShares(curRuntime)
+    dummyCall()
   }
 
   def addContainer(container: Container): Unit ={
