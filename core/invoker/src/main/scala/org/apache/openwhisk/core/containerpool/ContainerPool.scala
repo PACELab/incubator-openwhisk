@@ -77,6 +77,7 @@ class TrackFunctionStats(
   import ContainerPool.cpuSharesCheck
   //import ContainerPool.cpuSharesPool
   import ContainerPool.getActionType
+  import ContainerPool.printAllCpuShares
 
   private var cumulRuntime: Long = 0;
   private var numInvocations: Long = 0;
@@ -90,7 +91,7 @@ class TrackFunctionStats(
 
   private var latencyThreshold : Double  = 1.10;
   private var violationThreshold: Int = 1;
-  private var default_cpuSharesUpdate_Threshold: Int = 1
+  private var default_cpuSharesUpdate_Threshold: Int = 5
   private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold;
   private var shouldEaseup: Boolean = false;
 
@@ -139,9 +140,9 @@ class TrackFunctionStats(
 
     if(curRuntime> (latencyThreshold * myStandaloneRuntime) ){
       numViolations+=1
-      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> 1. for action: ${actionName} curRuntime: ${curRuntime} numReqsProcessed: ${numReqsProcessed} numViolations: ${numViolations}")      
+      //logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> 1. for action: ${actionName} curRuntime: ${curRuntime} numReqsProcessed: ${numReqsProcessed} numViolations: ${numViolations}")      
     }else{
-      logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> 2. for action: ${actionName} curRuntime: ${curRuntime} numReqsProcessed: ${numReqsProcessed} numViolations: ${numViolations}")      
+      //logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> 2. for action: ${actionName} curRuntime: ${curRuntime} numReqsProcessed: ${numReqsProcessed} numViolations: ${numViolations}")      
     }
 
     if( numViolations >= violationThreshold ){
@@ -196,6 +197,7 @@ class TrackFunctionStats(
             myAction.limits.iVals.myInferredConfig.mostusedCpuShares = trackSharesUsed.valuesIterator.max //trackSharesUsed.maxBy { case (key, value) => value }
             myAction.limits.iVals.myInferredConfig.numTimesUpdated = myAction.limits.iVals.myInferredConfig.numTimesUpdated+1            
             logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} update curShares: ${curCpuShares} numReqsProcessed: ${numReqsProcessed} prevSharesUsed: ${prevSharesUsed}and couldBeCpuShares: ${couldBeCpuShares} and tempCpuShares: ${tempCpuShares}. shouldEaseup: ${shouldEaseup} and on average will wait for ${curCpuSharesUpdate_Threshold} mostusedCpuShares: ${myAction.limits.iVals.myInferredConfig.mostusedCpuShares}, numTimesUpdated: ${myAction.limits.iVals.myInferredConfig.numTimesUpdated} avgNumtimeUsed: ${avgNumtimeUsed} ")                
+            printAllCpuShares()              
           }
           //logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> response from getCpuSharesFor is ${couldBeCpuShares} mostusedCpuShares: ${myAction.limits.iVals.myInferredConfig.mostusedCpuShares} numTimesUpdated: ${myAction.limits.iVals.myInferredConfig.numTimesUpdated}") 
         }
@@ -215,11 +217,11 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    checkCpuShares(curRuntime)
-    //dummyCall()
+    //checkCpuShares(curRuntime)
+    dummyCall()
   }
 
-  def addContainer(container: Container): Unit ={
+  def addContainer(container: Container): Unit = {
     //myContainers+= container;    
     myContainers.get(container) match {
       case Some(e) => myContainers(container)+=1
@@ -775,6 +777,14 @@ object ContainerPool {
     }    
   }
 
+  def printAllCpuShares(logging: AkkaLogging): Unit = {
+    var pool: Map[ActorRef,funcConfigTracking] = cpuSharesPool;
+    pool.keys.foreach{ curCont => 
+      var myConfig: funcConfigTracking = pool(curCont)
+      var updatedCpuShares = myConfig.getCurCpuShares()
+      logging.info(this, s"<avs_debug><printAllCpuShares> actName: ${myConfig.actionName} and my shares ${updatedCpuShares} ")      
+    }
+  }
   //def rebalanceCpuShares[A](pool: Map[A,funcConfigTracking],avgCpuSharesReduction: Int,toReduceActionName: String,logging: AkkaLogging): Unit = {
   def rebalanceCpuShares[A](avgCpuSharesReduction: Int,toReduceActionName: String,logging: AkkaLogging): Unit = {
     var pool: Map[ActorRef,funcConfigTracking] = cpuSharesPool;
