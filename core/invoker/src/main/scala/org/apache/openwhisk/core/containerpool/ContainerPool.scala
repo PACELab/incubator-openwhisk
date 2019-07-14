@@ -106,7 +106,7 @@ class TrackFunctionStats(
   trackSharesUsed = trackSharesUsed + (defaultCpuShares -> 0)
 
 
-  var curCpuShares = defaultCpuShares
+  var curCpuShares = 512 //defaultCpuShares
   var prevSharesUsed = curCpuShares // defaultCpuShares
   allCpuShares+= defaultCpuShares // added as part of consturctor.
 
@@ -218,8 +218,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    dummyCall()
-    //checkCpuShares(curRuntime)
+    //dummyCall()
+    checkCpuShares(curRuntime)
     if(curCpuSharesUsed==2){
       printAllCpuShares(logging)
     }
@@ -310,16 +310,33 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   // Otherwise actions with small memory-limits could block actions with large memory limits.
   var runBuffer = immutable.Queue.empty[Run]
   val logMessageInterval = 10.seconds
-  var trackContId = 0;
+  
+  
   // avs --begin
-
+  var trackContId = 0;
   // Assuming that this is called in the beginning ala container.
   containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->635.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->6350.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->18000.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1350.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0.0)
+
+  def addFunctionRuntime(functionName: String): Unit = {
+    if(functionName == "imageResizing_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 635.0)  
+    }else if (functionName == "rodinia_nn_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 6350.0)  
+    }else if (functionName == "euler3d_cpu_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000.0)  
+    }else if (functionName == "servingCNN_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
+    }else if (functionName == "invokerHealthTestAction0"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
+    }
+    
+  }  
   // avs --end
+
   prewarmConfig.foreach { config =>
     logging.info(this, s"pre-warming ${config.count} ${config.exec.kind} ${config.memoryLimit.toString}")(
       TransactionId.invokerWarmup)
@@ -341,22 +358,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       s"containerStart containerState: $containerState container: $container activations: $activeActivations of max $maxConcurrent action: $actionName namespace: $namespaceName activationId: $activationId and canUseCore: ${canUseCore} and r.coreToUse ${r.coreToUse}",
       akka.event.Logging.InfoLevel)
   }
-
-  def addFunctionRuntime(functionName: String): Unit = {
-    if(functionName == "imageResizing_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 635.0)  
-    }else if (functionName == "rodinia_nn_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 6350.0)  
-    }else if (functionName == "euler3d_cpu_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000.0)  
-    }else if (functionName == "servingCNN_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
-    }else if (functionName == "invokerHealthTestAction0"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
-    }
-    
-  }
-
 
   def receive: Receive = {
     // A job to run on a container
@@ -382,8 +383,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               .orElse(
                 // There was no warm/warming/warmingCold container. Try to take a prewarm container or a cold container.
                 // Is there enough space to create a new container or do other containers have to be removed?
-                if (hasPoolSpaceFor(busyPool ++ freePool, r.action.limits.memory.megabytes.MB)) {
-                  
+                if (hasPoolSpaceFor(busyPool ++ freePool, r.action.limits.memory.megabytes.MB)) {                  
                   // avs --begin
                   canUseCore = ((canUseCore+1)%4); 
                   avgActionRuntime.get(r.action.name.asString) match {
@@ -412,6 +412,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                   //logging.info(this, s"<avs_debug> ok creating a new container then! and canUseCore: ${canUseCore} and actionName: ${r.action.name.asString}."); 
                   r.coreToUse = canUseCore 
                   // avs --end
+
                   takePrewarmContainer(r.action)
                     .map(container => (container, "prewarmed"))
                     .orElse(Some(createContainer(r.action.limits.memory.megabytes.MB), "cold"))
@@ -451,29 +452,35 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
               }
               busyPool = busyPool + (actor -> newData)
               freePool = freePool - actor
+
               // avs --begin
               cpuSharesPool.get(actor) match {
                 case Some(curContConfig) =>
                   //cpuSharesPool = cpuSharesPool + (actor -> new funcConfigTracking(r.action.name.asString,trackContId,newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))
-                  logging.info(this, s"<avs_debug> ok actionName: ${curContConfig.actionName} with trackContId {curContConfig.trackContId} is already present! "); 
+                  logging.info(this, s"<avs_debug> <AddToCpuSharesPool> ok actionName: ${curContConfig.actionName} with trackContId {curContConfig.trackContId} is already present! "); 
                 case None =>
+                  logging.info(this, s"<avs_debug> <AddToCpuSharesPool> ok actionName: ${r.action.name.asString} with trackContId {curContConfig.trackContId} is NOT present! "); 
                   cpuSharesPool = cpuSharesPool + (actor -> new funcConfigTracking(r.action.name.asString,trackContId,newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))
                   trackContId+=1
               }
               // avs --end
+
             } else {
               //update freePool to track counts
               freePool = freePool + (actor -> newData)
+
               // avs --begin
               cpuSharesPool.get(actor) match {
                 case Some(curContConfig) =>
                   //cpuSharesPool = cpuSharesPool + (actor -> new funcConfigTracking(r.action.name.asString,trackContId,newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))
-                  logging.info(this, s"<avs_debug> ok actionName: ${curContConfig.actionName} with trackContId {curContConfig.trackContId} is already present! "); 
+                  logging.info(this, s"<avs_debug> <AddToCpuSharesPool> ok actionName: ${curContConfig.actionName} with trackContId {curContConfig.trackContId} is already present! "); 
                 case None =>
+                  logging.info(this, s"<avs_debug> <AddToCpuSharesPool> ok actionName: ${r.action.name.asString} with trackContId {curContConfig.trackContId} is NOT present! "); 
                   cpuSharesPool = cpuSharesPool + (actor -> new funcConfigTracking(r.action.name.asString,trackContId,newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))
                   trackContId+=1
               }
               // avs --end
+
             }
             // Remove the action that get's executed now from the buffer and execute the next one afterwards.
             if (isResentFromBuffer) {
@@ -554,13 +561,19 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         case Some(curActStats) => 
           //logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in avgActionRuntime and a new container is being added to it. ")
           curActStats.addContainer(warmData.container) 
-          cpuSharesPool.get(sender()) match{
+          /* cpuSharesPool.get(sender()) match{
             case Some(curContConfig) =>
               curContConfig.setCurCpuShares(curActStats.getCurCpuShares())
               //logging.info(this, s"<avs_debug> <InNeedWork> <updateConfig> actionName: ${warmData.action.name.asString} and it's cpuShares is ${curActStats.getCurCpuShares()} and cpuShares according to config is ${curContConfig.getCurCpuShares()} ")
+              logging.info(this, s"<avs_debug> <CpuSharesPoolUpdate> ok actionName: ${curContConfig.actionName} with trackContId {curContConfig.trackContId} is present and it's cpuShares is ${curContConfig.getCurCpuShares()}! ");
             case None =>
               logging.info(this, s"<avs_debug> <InNeedWork> <updateConfig> actionName: ${warmData.action.name.asString} this container is not in cpuSharesPool. HANDLE it!! ")              
-          }
+          } */
+
+          cpuSharesPool.get(sender()).foreach { curContConfig =>
+            curContConfig.setCurCpuShares(curActStats.getCurCpuShares())
+            logging.info(this, s"<avs_debug> <CpuSharesPoolUpdate>  ok actionName: ${curContConfig.actionName} with trackContId {curContConfig.trackContId} is present and it's cpuShares is ${curContConfig.getCurCpuShares()}! ");
+          }          
         case None => 
           logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is NOT present in avgActionRuntime and a new container is NOT being added to it. HANDLE it!")
       }
@@ -574,7 +587,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     case ContainerRemoved =>
       // avs --begin
       cpuSharesPool.get(sender()).foreach { curActData =>
-        logging.info(this, s"<avs_debug> <ContainerRemoved> Removing container for ${curActData.actionName}")
+        logging.info(this, s"<avs_debug> <ContainerRemoved> Removing container for ${curActData.actionName} and trackContId: ${curActData.trackContId}")
         cpuSharesPool = cpuSharesPool - sender()
       }
       // avs --end
@@ -600,9 +613,15 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     // 3. The container aged and is destroying itself
     // Update the free/busy lists but no message is sent to the feed since there is no change in capacity yet
     case RescheduleJob =>
+      //avs --begin
+      cpuSharesPool.get(sender()).foreach { curActData =>
+        logging.info(this, s"<avs_debug> <RescheduleJob> Removing container for ${curActData.actionName} and trackContId: ${curActData.trackContId} ")
+        cpuSharesPool = cpuSharesPool - sender()
+      }
+      // avs --end
+
       freePool = freePool - sender()
       busyPool = busyPool - sender()
-      cpuSharesPool = cpuSharesPool - sender() //avs
     //avs --begin
     //case UpdateStats(actionName: String,runtime: Long) => 
     case UpdateStats(actionName: String,runtime: Long) => 
@@ -612,6 +631,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           curActTrackedStats.addRuntime(runtime)         
           var curCpuShares = curActTrackedStats.getCurCpuShares()
           // probably overkill, but wouldn't hurt since sender would only be removed in case sender wasn't/hasn't been removed in "ContainerRemoved!"
+          
           cpuSharesPool.get(sender()).foreach { curActData =>
             curActData.setCurCpuShares(curCpuShares)
           }
@@ -634,7 +654,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       }      
       // probably overkill, but wouldn't hurt since sender would only be removed in case sender wasn't/hasn't been removed in "ContainerRemoved!"
       cpuSharesPool.get(sender()).foreach { curActData =>
-        logging.info(this, s"<avs_debug> <RemoveContTracking> Removing container for ${curActData.actionName}")
+        logging.info(this, s"<avs_debug> <RemoveContTracking> Removing container for ${curActData.actionName} and trackContId: ${curActData.trackContId} ")
         cpuSharesPool = cpuSharesPool - sender()
       }
       // avs --end      
@@ -768,15 +788,6 @@ object ContainerPool {
         if(avgCpuSharesReduction>=0)
           rebalanceCpuShares(avgCpuSharesReduction,toIncActionName,logging)
 
-        /*afterUpdatingAccumShares = cpuSharesConsumptionOf(pool)
-        //logging.info(this, s"<avs_debug><cpuSharesCheck> numIters: ${numIters} 1. canUpdate: ${canUpdate} befUpdatingAccumShares: ${befUpdatingAccumShares} afterUpdatingAccumShares: ${afterUpdatingAccumShares} diffCpuShares: ${diffCpuShares}") 
-        if( (befUpdatingAccumShares - afterUpdatingAccumShares) < diffCpuShares){ // since we cannot reduce shares of others, we will reduce our demands.
-          diffCpuShares = ( (numContsToUpdate  * resUpdatedShares) + cpuSharesConsumptionOf(pool) ) - totalCpuShares;
-          if(numContsToUpdate!=0) avgCpuSharesReduction = diffCpuShares/numContsToUpdate
-          resUpdatedShares = resUpdatedShares - avgCpuSharesReduction
-          //logging.info(this, s"<avs_debug><cpuSharesCheck> 2. canUpdate: ${canUpdate} befUpdatingAccumShares: ${befUpdatingAccumShares} afterUpdatingAccumShares: ${afterUpdatingAccumShares} diffCpuShares: ${diffCpuShares}") 
-        }*/
-
         canUpdate = ( cpuSharesConsumptionOf(pool) + (numContsToUpdate  * resUpdatedShares) ) <= totalCpuShares 
 
         if(!canUpdate){
@@ -799,8 +810,8 @@ object ContainerPool {
     var pool: Map[ActorRef,funcConfigTracking] = cpuSharesPool;
     var tempCpuShares = 0;
     logging.info(this, s"<avs_debug><printAllCpuShares> BEGIN *************** ")      
-    pool.keys.foreach{ curCont => 
-      var myConfig: funcConfigTracking = pool(curCont)
+    pool.keys.foreach{ curActor => 
+      var myConfig: funcConfigTracking = pool(curActor)
       var updatedCpuShares = myConfig.getCurCpuShares()
       tempCpuShares = tempCpuShares + updatedCpuShares
       logging.info(this, s"<avs_debug><printAllCpuShares> ${myConfig.actionName} ${myConfig.trackContId} ${updatedCpuShares} ")      
@@ -810,9 +821,9 @@ object ContainerPool {
 
   def rebalanceCpuShares[A](avgCpuSharesReduction: Int,toIncActionName: String,logging: AkkaLogging): Unit = {
     var pool: Map[ActorRef,funcConfigTracking] = cpuSharesPool;
-    pool.keys.foreach{ curCont => 
+    pool.keys.foreach{ curActor => 
 
-      var myConfig: funcConfigTracking = pool(curCont)
+      var myConfig: funcConfigTracking = pool(curActor)
       if(myConfig.actionName != toIncActionName){
         var updatedCpuShares = myConfig.getCurCpuShares()-avgCpuSharesReduction // WARNING: Should fix this to be a dynamic value.  
         //logging.info(this, s"<avs_debug><rebalanceCpuShares> actName: ${myConfig.actionName} and my type: ${myConfig.actionType} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares} and avgCpuSharesReduction: ${avgCpuSharesReduction}")
@@ -820,12 +831,12 @@ object ContainerPool {
         if(updatedCpuShares >= myConfig.getDefaultCpuShares()){
           myConfig.myContData.getContainer match {
             case Some(myContainer) => 
-              logging.info(this, s"<avs_debug><rebalanceCpuShares> Going to update my CPUSHARES. actName: ${myConfig.actionName} and my type: ${myConfig.actionType} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares}")
+              logging.info(this, s"<avs_debug><rebalanceCpuShares> Going to update my CPUSHARES. actName: ${myConfig.actionName} and my type: ${myConfig.actionType} my id: ${myConfig.trackContId} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares}")
               myContainer.updateCpuShares(myConfig.curId,updatedCpuShares)
               myConfig.setCurCpuShares(updatedCpuShares)
             case None => 
               if(myConfig.actionName != "invokerHealthTestAction0")
-              logging.info(this, s"<avs_debug><rebalanceCpuShares> Container NOT FOUND to update my CPUSHARES. actName: ${myConfig.actionName} and my type: ${myConfig.actionType} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares}. HANDLE it!!")
+              logging.info(this, s"<avs_debug><rebalanceCpuShares> Container NOT FOUND to update my CPUSHARES. actName: ${myConfig.actionName} and my type: ${myConfig.actionType}  my id: ${myConfig.trackContId} and my cpuShares is ${myConfig.getCurCpuShares()} and updatedCpuShares: ${updatedCpuShares}. HANDLE it!!")
           }
         }
 
