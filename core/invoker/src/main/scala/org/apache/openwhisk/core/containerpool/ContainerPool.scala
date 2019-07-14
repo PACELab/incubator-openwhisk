@@ -106,7 +106,7 @@ class TrackFunctionStats(
   trackSharesUsed = trackSharesUsed + (defaultCpuShares -> 0)
 
 
-  var curCpuShares = 128 // defaultCpuShares
+  var curCpuShares = defaultCpuShares
   var prevSharesUsed = curCpuShares // defaultCpuShares
   allCpuShares+= defaultCpuShares // added as part of consturctor.
 
@@ -218,8 +218,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    checkCpuShares(curRuntime)
-    //dummyCall()
+    dummyCall()
+    //checkCpuShares(curRuntime)
     if(curCpuSharesUsed==2){
       printAllCpuShares(logging)
     }
