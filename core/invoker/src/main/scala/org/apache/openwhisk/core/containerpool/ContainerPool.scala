@@ -46,6 +46,7 @@ class contStatsData(var cpuShares: Int,val trackContId:Int){
 class funcConfigTracking(
   var actionName: String, 
   val curId: TransactionId, 
+  val myFuncStats: TrackFunctionStats,
   private val logging: AkkaLogging,
 ){
 
@@ -64,7 +65,7 @@ class funcConfigTracking(
         //logging.info(this, s"<avs_debug> <funcConfigTracking> <getCurCpuShares> for action: ${actionName} myContStats.cpuShares: ${myContStats.cpuShares} and id: ${myContStats.trackContId}")
         myContStats.cpuShares
       case None => 
-        //logging.info(this, s"<avs_debug> <funcConfigTracking> <getCurCpuShares> for action: ${actionName} container missing. HANDLE it!")
+        logging.info(this, s"<avs_debug> <funcConfigTracking> <getCurCpuShares> for action: ${actionName} container missing. HANDLE it!")
         0
     }
   }
@@ -74,7 +75,7 @@ class funcConfigTracking(
       case Some(myContStats) => 
         myContStats.trackContId
       case None => 
-        //logging.info(this, s"<avs_debug> <funcConfigTracking> <getCurContID> for action: ${actionName} container missing. HANDLE it!")
+        logging.info(this, s"<avs_debug> <funcConfigTracking> <getCurContID> for action: ${actionName} container missing. HANDLE it!")
         0
     }
   }
@@ -86,7 +87,7 @@ class funcConfigTracking(
         myContStats.numTimesUsed+=1
         //logging.info(this, s"<avs_debug> <funcConfigTracking> <setCurCpuShares> for action: ${actionName} myContStats.cpuShares (updated): ${myContStats.cpuShares} and id: ${myContStats.trackContId} and is used: ${myContStats.numTimesUsed}")
       case None => 
-        //logging.info(this, s"<avs_debug> <funcConfigTracking> <setCurCpuShares> for action: ${actionName} container missing. HANDLE it!")
+        logging.info(this, s"<avs_debug> <funcConfigTracking> <setCurCpuShares> for action: ${actionName} container missing. HANDLE it!")
     
     }
   }
@@ -132,7 +133,7 @@ class funcConfigTracking(
     var sumCpuShares = 0
     myContainers.keys.foreach{ curCont =>
       var curContData: contStatsData = myContainers(curCont)
-      //logging.info(this,s"<avs_debug><funcConfigTracking><accumAllCpuShares> ${actionName} ${curContData.trackContId} ${curContData.cpuShares}")
+      logging.info(this,s"<avs_debug><funcConfigTracking><accumAllCpuShares> ${actionName} ${curContData.trackContId} ${curContData.cpuShares}")
       sumCpuShares = sumCpuShares + curContData.cpuShares
     } 
     sumCpuShares
@@ -186,8 +187,7 @@ class TrackFunctionStats(
   private var trackSharesUsed = mutable.Map.empty[Int,Int] // <num-shares>,<num-times-used>
   trackSharesUsed = trackSharesUsed + (defaultCpuShares -> 0)
 
-
-  var curCpuShares = 512 //defaultCpuShares
+  var curCpuShares = defaultCpuShares
   var prevSharesUsed = curCpuShares // defaultCpuShares
   allCpuShares+= defaultCpuShares // added as part of consturctor.
 
@@ -199,8 +199,13 @@ class TrackFunctionStats(
     curCpuShares
   }
 
+  def setCurCpuShares(toSetCpuShares: Int): Unit = {
+    curCpuShares = toSetCpuShares
+    logging.info(this, s"<avs_debug> <TrackFunctionStats> <setCurCpuShares> for action: ${actionName} changed curShares: ${curCpuShares} toSetCpuShares: ${toSetCpuShares} ")                
+  }
+
   def getDefaultCpuShares(): Int = {
-    curCpuShares
+    defaultCpuShares
   }
 
   def getCurTxnId(): TransactionId = {
@@ -614,21 +619,23 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       }
       //avs --begin
       // WARNING: Pending, removing the member when container is removed.
+      var toUseCpuShares = 0
       avgActionRuntime.get(warmData.action.name.asString) match {
         case Some(curActStats) => 
           //logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in avgActionRuntime and a new container is being added to it. ")
           curActStats.addContainer(warmData.container)  
+          toUseCpuShares = curActStats.getCurCpuShares()
 
           cpuSharesPool.get(warmData.action.name.asString) match {
             case Some(curActFuncTracking) => 
-              trackContId = curActFuncTracking.addContainer(warmData.container,curActStats.getDefaultCpuShares(),trackContId) // will update contId, if 
-              //logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in cpuSharesPool and container (trackContId: ${trackContId-1} and cpuShares: ${curActStats.getDefaultCpuShares()}) being updated to it.!")
+              trackContId = curActFuncTracking.addContainer(warmData.container,toUseCpuShares,trackContId) // will update contId, if 
+              logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in cpuSharesPool and container (trackContId: ${trackContId-1} and cpuShares: ${toUseCpuShares}) being updated to it.!")
             case None => 
               // (actor -> new funcConfigTracking(r.action.name.asString,trackContId,newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))              
-              cpuSharesPool = cpuSharesPool + (warmData.action.name.asString -> new funcConfigTracking(warmData.action.name.asString,curActStats.getCurTxnId(),logging))
+              cpuSharesPool = cpuSharesPool + (warmData.action.name.asString -> new funcConfigTracking(warmData.action.name.asString,curActStats.getCurTxnId(),curActStats,logging))
               var myConfigTracking :funcConfigTracking = cpuSharesPool(warmData.action.name.asString)
-              trackContId = myConfigTracking.addContainer(warmData.container,curActStats.getCurCpuShares(),trackContId) 
-              logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is NOT present in cpuSharesPool and a new container (trackContId: ${trackContId-1} and cpuShares: ${curActStats.getCurCpuShares()}) being added to it.!")
+              trackContId = myConfigTracking.addContainer(warmData.container,toUseCpuShares,trackContId) 
+              logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is NOT present in cpuSharesPool and a new container (trackContId: ${trackContId-1} and cpuShares: ${toUseCpuShares}) being added to it.!")
           }
 
         case None => 
@@ -863,21 +870,31 @@ object ContainerPool {
       myConfig.printAllContainers()
       tempCpuShares = tempCpuShares+ myConfig.accumAllCpuShares()
     }
+    logging.info(this, s"<avs_debug><printAllCpuShares> End: ${tempCpuShares} *************** ")      
+  }
 
   def rebalanceCpuShares[A](avgCpuSharesReduction: Int,toIncActionName: String,logging: AkkaLogging): Unit = {
     var pool: Map[String,funcConfigTracking] = cpuSharesPool;
     pool.keys.foreach{ curActionName => 
       var myConfig: funcConfigTracking = pool(curActionName)
+      
       if(myConfig.actionName != toIncActionName){
+        var updatedCpuShares = 0; 
         myConfig.myContainers.keys.foreach{ curCont => 
-          var updatedCpuShares = myConfig.getCurCpuShares(curCont) - avgCpuSharesReduction
+
+          updatedCpuShares = myConfig.getCurCpuShares(curCont) - avgCpuSharesReduction
           if(updatedCpuShares >= myConfig.getDefaultCpuShares()){
             logging.info(this, s"<avs_debug><rebalanceCpuShares> Going to update my CPUSHARES. actName: ${myConfig.actionName} my id: ${myConfig.getCurContID(curCont)} and my cpuShares is ${myConfig.getCurCpuShares(curCont)} and updatedCpuShares: ${updatedCpuShares}")                    
             curCont.updateCpuShares(myConfig.curId,updatedCpuShares)
             myConfig.setCurCpuShares(curCont,updatedCpuShares)            
           }else{
-            logging.info(this, s"<avs_debug><rebalanceCpuShares> NOT going to update my cpushares. actName: ${myConfig.actionName} my id: ${myConfig.getCurContID(curCont)} and my cpuShares is ${myConfig.getCurCpuShares(curCont)} and updatedCpuShares: ${updatedCpuShares}")                    
+            logging.info(this, s"<avs_debug><rebalanceCpuShares> NOTT going to update my cpushares. actName: ${myConfig.actionName} my id: ${myConfig.getCurContID(curCont)} and my cpuShares is ${myConfig.getCurCpuShares(curCont)} and updatedCpuShares: ${updatedCpuShares}")                    
           }
+        }
+
+        if(updatedCpuShares!=0){
+          logging.info(this, s"<avs_debug><rebalanceCpuShares> ActName: ${myConfig.actionName} updatedCpuShares: ${updatedCpuShares} will updated myFuncStats")                    
+          myConfig.myFuncStats.setCurCpuShares(updatedCpuShares) 
         }
       }
     }
