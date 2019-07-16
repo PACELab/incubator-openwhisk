@@ -312,8 +312,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    //dummyCall()
-    checkCpuShares(curRuntime)
+    dummyCall()
+    //checkCpuShares(curRuntime)
     if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)){
       printAllCpuShares(logging)
     }
@@ -629,7 +629,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           cpuSharesPool.get(warmData.action.name.asString) match {
             case Some(curActFuncTracking) => 
               trackContId = curActFuncTracking.addContainer(warmData.container,toUseCpuShares,trackContId) // will update contId, if 
-              logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in cpuSharesPool and container (trackContId: ${trackContId-1} and cpuShares: ${toUseCpuShares}) being updated to it.!")
+              //logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in cpuSharesPool and container (trackContId: ${trackContId-1} and cpuShares: ${toUseCpuShares}) being updated to it.!")
             case None => 
               // (actor -> new funcConfigTracking(r.action.name.asString,trackContId,newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))              
               cpuSharesPool = cpuSharesPool + (warmData.action.name.asString -> new funcConfigTracking(warmData.action.name.asString,curActStats.getCurTxnId(),curActStats,logging))
