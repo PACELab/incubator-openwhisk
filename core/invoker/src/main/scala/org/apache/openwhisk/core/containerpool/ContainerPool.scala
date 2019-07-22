@@ -312,8 +312,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    //dummyCall()
-    checkCpuShares(curRuntime)
+    dummyCall()
+    //checkCpuShares(curRuntime)
     if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)){
       printAllCpuShares(logging)
     }
@@ -412,9 +412,10 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->635.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->6350.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->18000.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1350.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1800.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->550.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0.0)
-
+  
   def addFunctionRuntime(functionName: String): Unit = {
     if(functionName == "imageResizing_v1"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 635.0)  
@@ -423,8 +424,11 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     }else if (functionName == "euler3d_cpu_v1"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000.0)  
     }else if (functionName == "servingCNN_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
-    }else if (functionName == "invokerHealthTestAction0"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1800.0)  
+    }else if (functionName =="realTimeAnalytics_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 550.0)  
+    }
+    else if (functionName == "invokerHealthTestAction0"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
     }
     
@@ -796,7 +800,10 @@ object ContainerPool {
         "MP"
     }else if (functionName == "servingCNN_v1"){
         "ET" 
-    }else{
+    }else if (functionName == "realTimeAnalytics_v1"){
+        "ET"       
+    }
+    else{
         "MP"
     }
   }
