@@ -312,8 +312,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    //dummyCall()
-    checkCpuShares(curRuntime)
+    dummyCall()
+    //checkCpuShares(curRuntime)
     if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)){
       printAllCpuShares(logging)
     }
