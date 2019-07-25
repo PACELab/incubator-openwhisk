@@ -173,13 +173,13 @@ class TrackFunctionStats(
   private var updateCount_Flag: Boolean = false;
   private var numViolations: Int = 0
 
+  private var myActionType = getActionType(actionName)
   private var latencyThreshold : Double  = 1.10;
   private var violationThreshold: Int = 1;
-  private var default_cpuSharesUpdate_Threshold: Int = 3
-  private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold
+  private var default_cpuSharesUpdate_Threshold: Int = if(myActionType=="ET") 5 else 1
+  private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold;
   private var shouldEaseup: Boolean = false;
 
-  private var myActionType = getActionType(actionName)
   private var perIterIncrement = if(myActionType=="ET") 128 else 64
   private var maxCpuShares = if(myActionType=="ET") 768 else 256
 
