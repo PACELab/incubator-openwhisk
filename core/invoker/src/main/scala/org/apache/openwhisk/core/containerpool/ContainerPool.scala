@@ -176,7 +176,7 @@ class TrackFunctionStats(
   private var latencyThreshold : Double  = 1.10;
   private var violationThreshold: Int = 1;
   private var default_cpuSharesUpdate_Threshold: Int = 3
-  private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold;
+  private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold
   private var shouldEaseup: Boolean = false;
 
   private var myActionType = getActionType(actionName)
