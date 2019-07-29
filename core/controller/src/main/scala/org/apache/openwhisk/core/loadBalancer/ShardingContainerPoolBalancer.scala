@@ -263,6 +263,7 @@ class ShardingContainerPoolBalancer(
       val hash = ShardingContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
       val homeInvoker = hash % invokersToUse.size
       val stepSize = stepSizes(hash % stepSizes.size)
+      logging.info(this,s"<avs_debug> <publish> Calling schedule for activation ${msg.activationId} for '${msg.action.asString}' ($actionType) ") // avs
       val invoker: Option[(InvokerInstanceId, Boolean)] = ShardingContainerPoolBalancer.schedule(
         action.limits.concurrency.maxConcurrent,
         action.fullyQualifiedName(true),
@@ -399,17 +400,22 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
 
     if (numInvokers > 0) {
       val invoker = invokers(index)
+      logging.info(this,s"<avs_debug> <schedule> 0. stepsDone: ${stepsDone} numInvokers: ${numInvokers} invoker: ${invoker.id.toInt}") // avs
       //test this invoker - if this action supports concurrency, use the scheduleConcurrent function
       if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquireConcurrent(fqn, maxConcurrent, slots)) {
+        logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
         Some(invoker.id, false)
       } else {
+        logging.info(this,s"<avs_debug> <schedule> 2. <all-invokers-checked> stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
         // If we've gone through all invokers
         if (stepsDone == numInvokers + 1) {
           val healthyInvokers = invokers.filter(_.status.isUsable)
           if (healthyInvokers.nonEmpty) {
+            logging.info(this,s"<avs_debug> <schedule> 2.1 <found-A-healthy-invoker> stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
             // Choose a healthy invoker randomly
             val random = healthyInvokers(ThreadLocalRandom.current().nextInt(healthyInvokers.size)).id
             dispatched(random.toInt).forceAcquireConcurrent(fqn, maxConcurrent, slots)
+            logging.info(this,s"<avs_debug> <schedule> 2.2 <found-A-healthy-invoker> stepsDone: ${stepsDone} invoker: ${random.toInt}") // avs
             logging.warn(this, s"system is overloaded. Chose invoker${random.toInt} by random assignment.")
             Some(random, true)
           } else {
@@ -417,6 +423,7 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
           }
         } else {
           val newIndex = (index + step) % numInvokers
+          logging.info(this,s"<avs_debug> <schedule> 3. <another-call-to-schedule> stepsDone: ${stepsDone} newIndex: ${newIndex} maxConcurrent: ${maxConcurrent}") // avs
           schedule(maxConcurrent, fqn, invokers, dispatched, slots, newIndex, step, stepsDone + 1)
         }
       }

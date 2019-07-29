@@ -140,9 +140,18 @@ class InvokerReactive(
     msgProvider.getConsumer(config, topic, topic, maxPeek, maxPollInterval = TimeLimit.MAX_DURATION + 1.minute)
 
   private val activationFeed = actorSystem.actorOf(Props {
-    new MessageFeed("activation", logging, consumer, maxPeek, 1.second, processActivationMessage)
+    new MessageFeed("activation", logging, consumer, maxPeek, 1.second, processActivationMessage) 
   })
 
+// avs --begin
+  val a_topic = s"load-invoker${instance.toInt}"
+  private val a_consumer =
+    msgProvider.getConsumer(config, a_topic, a_topic, maxPeek, maxPollInterval = TimeLimit.MAX_DURATION + 1.minute)
+
+  private val a_activationFeed = actorSystem.actorOf(Props {
+    new MessageFeed("loadmessages", logging, a_consumer, maxPeek, 1.second, processLoadMessage) 
+  })
+// avs --end   
   /** Sends an active-ack. */
   private val ack: InvokerReactive.ActiveAck = (tid: TransactionId,
                                                 activationResult: WhiskActivation,
@@ -205,6 +214,15 @@ class InvokerReactive(
   
   private val pool =
     actorSystem.actorOf(ContainerPool.props(childFactory, poolConfig, activationFeed, prewarmingConfigs))
+
+// avs --begin
+def processLoadMessage(bytes: Array[Byte]): Future[Unit] = Future{
+  val raw = new String(bytes, StandardCharsets.UTF_8)
+  //Future(LoadMessage.parse(val)))
+  logging.error(this, s"<avs_debug> <processLoadMessage> raw_message: ${raw}")
+  a_activationFeed ! MessageFeed.Processed
+}
+// avs --end
 
   /** Is called when an ActivationMessage is read from Kafka */
   def processActivationMessage(bytes: Array[Byte]): Future[Unit] = {

@@ -165,6 +165,17 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
           logLevel = InfoLevel)
       case Failure(_) => transid.failed(this, start, s"error on posting to topic $topic")
     }
+
+    // avs --begin
+    val a_topic = s"load-invoker${invoker.toInt}"
+    val a_msg: LoadMessage = LoadMessage(s"SanityCheck${invoker.toInt} and activID : ${msg.activationId}")
+    producer.send(a_topic, a_msg).andThen {
+      case Success(status) =>
+        logging.info(this, s"<avs_debug> On topic: ${a_topic} SUCCESSFULLY posted message: ${a_msg} ")
+      case Failure(_) => 
+        logging.info(this, s"<avs_debug> On topic: ${a_topic} DIDNOT post message: ${a_msg} ")
+    }    
+    // avs --end
   }
 
   /**

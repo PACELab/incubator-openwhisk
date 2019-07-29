@@ -71,6 +71,24 @@ object ActivationMessage extends DefaultJsonProtocol {
   implicit val serdes = jsonFormat10(ActivationMessage.apply)
 }
 
+
+// avs --begin
+case class LoadMessage(myStr: String) extends Message {
+  override def serialize = LoadMessage.serdes.write(this).compactPrint
+
+  override def toString = {
+    s"$myStr"
+  }
+
+}
+
+object LoadMessage extends DefaultJsonProtocol {
+  def parse(msg: String) = Try(serdes.read(msg.parseJson))
+  //def parse(msg: String) = Try(msg)
+  implicit val serdes = jsonFormat(LoadMessage.apply _, "myStr")
+}
+// avs --end
+
 /**
  * Message that is sent from the invoker to the controller after action is completed or after slot is free again for
  * new actions.

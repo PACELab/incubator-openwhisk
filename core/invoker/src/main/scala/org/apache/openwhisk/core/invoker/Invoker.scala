@@ -145,17 +145,40 @@ object Invoker {
     initKamon(assignedInvokerId)
 
     val topicBaseName = "invoker"
-    val topicName = topicBaseName + assignedInvokerId
+    val loadTopicBaseName = "load-invoker"
 
     val maxMessageBytes = Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)
     val invokerInstance =
       InvokerInstanceId(assignedInvokerId, cmdLineArgs.uniqueName, cmdLineArgs.displayedName, poolConfig.userMemory)
 
     val msgProvider = SpiLoader.get[MessagingProvider]
-    if (msgProvider
+
+  val topicName = topicBaseName + assignedInvokerId
+/*    if (msgProvider
           .ensureTopic(config, topic = topicName, topicConfig = topicBaseName, maxMessageBytes = maxMessageBytes)
           .isFailure) {
       abort(s"failure during msgProvider.ensureTopic for topic $topicName")
+    }
+
+/ *    Seq(
+      ("completed" + instance.asString, "completed", Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)),
+      ("health", "health", None),
+      ("cacheInvalidation", "cache-invalidation", None),
+      ("events", "events", None)).foreach {
+      case (topic, topicConfigurationKey, maxMessageBytes) =>
+        if (msgProvider.ensureTopic(config, topic, topicConfigurationKey, maxMessageBytes).isFailure) {
+          abort(s"failure during msgProvider.ensureTopic for topic $topic")
+        }
+    }
+ */
+
+    Seq(
+      (topicBaseName + assignedInvokerId, topicBaseName, Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)),
+      (loadTopicBaseName + assignedInvokerId, loadTopicBaseName, Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT))).foreach {
+      case (topic, topicConfigurationKey, maxMessageBytes) =>
+        if (msgProvider.ensureTopic(config, topic, topicConfigurationKey, maxMessageBytes).isFailure) {
+          abort(s"failure during msgProvider.ensureTopic for topic $topic")
+        }
     }
 
     val producer = msgProvider.getProducer(config, Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT))

@@ -161,7 +161,7 @@ class TrackFunctionStats(
   import ContainerPool.cpuSharesCheck
   //import ContainerPool.cpuSharesPool
   import ContainerPool.getActionType
-  import ContainerPool.printAllCpuShares
+  //import ContainerPool.printAllCpuShares
 
   private var cumulRuntime: Long = 0;
   private var numInvocations: Long = 0;
@@ -312,11 +312,9 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
-    //dummyCall()
-    checkCpuShares(curRuntime)
-    if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)){
-      printAllCpuShares(logging)
-    }
+    dummyCall()
+    //checkCpuShares(curRuntime)
+    //if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)) printAllCpuShares(logging)
   }
 
   def addContainer(container: Container): Unit = {
@@ -426,6 +424,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
     }else if (functionName == "invokerHealthTestAction0"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
+    }else {
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 300000.0)  // max of 5 minutes.
     }
     
   }  
