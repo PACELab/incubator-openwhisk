@@ -176,12 +176,12 @@ class TrackFunctionStats(
   private var myActionType = getActionType(actionName)
   private var latencyThreshold : Double  = 1.10;
   private var violationThreshold: Int = 1;
-  private var default_cpuSharesUpdate_Threshold: Int = if(myActionType=="ET") 5 else 3
+  private var default_cpuSharesUpdate_Threshold: Int = if(myActionType=="ET") 5 else 1
   private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold;
   private var shouldEaseup: Boolean = false;
 
   private var perIterIncrement = if(myActionType=="ET") 128 else 64
-  private var maxCpuShares = if(myActionType=="ET") 768 else 256
+  private var maxCpuShares = 1024 //if(myActionType=="ET") 768 else 256
 
   private var numReqsProcessed = 0
   private var trackSharesUsed = mutable.Map.empty[Int,Int] // <num-shares>,<num-times-used>
@@ -289,10 +289,11 @@ class TrackFunctionStats(
 
           if(updateCount_Flag){
             allCpuShares+= curCpuShares
-            myAction.limits.iVals.myInferredConfig.mostusedCpuShares = trackSharesUsed.valuesIterator.max //trackSharesUsed.maxBy { case (key, value) => value }
+            myAction.limits.iVals.myInferredConfig.mostusedCpuShares = trackSharesUsed.keysIterator.max //trackSharesUsed.maxBy { case (key, value) => value }
             myAction.limits.iVals.myInferredConfig.numTimesUpdated = myAction.limits.iVals.myInferredConfig.numTimesUpdated+1
             //printAllCpuShares(logging)              
-            logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} update curShares: ${curCpuShares} numReqsProcessed: ${numReqsProcessed} prevSharesUsed: ${prevSharesUsed} and couldBeCpuShares: ${couldBeCpuShares} and tempCpuShares: ${tempCpuShares}. shouldEaseup: ${shouldEaseup} and on average will wait for ${curCpuSharesUpdate_Threshold} mostusedCpuShares: ${myAction.limits.iVals.myInferredConfig.mostusedCpuShares}, numTimesUpdated: ${myAction.limits.iVals.myInferredConfig.numTimesUpdated} avgNumtimeUsed: ${avgNumtimeUsed} ")                
+            logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} update curShares: ${curCpuShares} prevSharesUsed: ${prevSharesUsed} and couldBeCpuShares: ${couldBeCpuShares} and tempCpuShares: ${tempCpuShares}. ")
+            logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> action: ${actionName} shouldEaseup: ${shouldEaseup} and on average will wait for ${curCpuSharesUpdate_Threshold} mostusedCpuShares: ${myAction.limits.iVals.myInferredConfig.mostusedCpuShares}, avgNumtimeUsed: ${avgNumtimeUsed} numReqsProcessed: ${numReqsProcessed} and curNumConts: ${curNumConts}")                
           }
           //logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> response from getCpuSharesFor is ${couldBeCpuShares} mostusedCpuShares: ${myAction.limits.iVals.myInferredConfig.mostusedCpuShares} numTimesUpdated: ${myAction.limits.iVals.myInferredConfig.numTimesUpdated}") 
         }
