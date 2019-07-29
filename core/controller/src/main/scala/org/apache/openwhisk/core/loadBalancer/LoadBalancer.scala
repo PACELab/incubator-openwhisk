@@ -109,6 +109,29 @@ trait LoadBalancerProvider extends Spi {
       }
     }
   }
+// avs --begin
+  def createLoadFeedFactory(whiskConfig: WhiskConfig, instance: ControllerInstanceId)(implicit actorSystem: ActorSystem,
+                                                                                  logging: Logging): FeedFactory = {
+
+    val activeAckTopic = s"load-completed${instance.asString}"
+    val maxActiveAcksPerPoll = 128
+    val activeAckPollDuration = 1.second
+
+    new FeedFactory {
+      def createFeed(f: ActorRefFactory, provider: MessagingProvider, acker: Array[Byte] => Future[Unit]) = {
+        f.actorOf(Props {
+          new MessageFeed(
+            "loadResponse",
+            logging,
+            provider.getConsumer(whiskConfig, activeAckTopic, activeAckTopic, maxPeek = maxActiveAcksPerPoll),
+            maxActiveAcksPerPoll,
+            activeAckPollDuration,
+            acker)
+        })
+      }
+    }
+  }
+// avs --end  
 }
 
 /** Exception thrown by the loadbalancer */

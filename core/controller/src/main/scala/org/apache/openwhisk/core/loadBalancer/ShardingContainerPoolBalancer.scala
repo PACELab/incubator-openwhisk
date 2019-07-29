@@ -145,12 +145,14 @@ class ShardingContainerPoolBalancer(
   config: WhiskConfig,
   controllerInstance: ControllerInstanceId,
   feedFactory: FeedFactory,
+  loadFeedFactory: FeedFactory, //avs
   val invokerPoolFactory: InvokerPoolFactory,
   implicit val messagingProvider: MessagingProvider = SpiLoader.get[MessagingProvider])(
   implicit actorSystem: ActorSystem,
   logging: Logging,
   materializer: ActorMaterializer)
-    extends CommonLoadBalancer(config, feedFactory, controllerInstance) {
+    extends CommonLoadBalancer(config, feedFactory, loadFeedFactory,controllerInstance) { 
+//extends CommonLoadBalancer(config, feedFactory,controllerInstance) // avs added loadFeedFactory
 
   /** Build a cluster of all loadbalancers */
   private val cluster: Option[Cluster] = if (loadConfigOrThrow[ClusterConfig](ConfigKeys.cluster).useClusterBootstrap) {
@@ -352,6 +354,7 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
       whiskConfig,
       instance,
       createFeedFactory(whiskConfig, instance),
+      createLoadFeedFactory(whiskConfig, instance), //avs
       invokerPoolFactory)
   }
 

@@ -42,12 +42,14 @@ import scala.concurrent.Future
  */
 class LeanBalancer(config: WhiskConfig,
                    feedFactory: FeedFactory,
+                   loadFeedFactory: FeedFactory, //avs
                    controllerInstance: ControllerInstanceId,
                    implicit val messagingProvider: MessagingProvider = SpiLoader.get[MessagingProvider])(
   implicit actorSystem: ActorSystem,
   logging: Logging,
   materializer: ActorMaterializer)
-    extends CommonLoadBalancer(config, feedFactory, controllerInstance) {
+    extends CommonLoadBalancer(config, feedFactory, loadFeedFactory,controllerInstance) {          
+    //extends CommonLoadBalancer(config, feedFactory, controllerInstance) {
 
   /** Loadbalancer interface methods */
   override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = Future.successful(IndexedSeq.empty[InvokerHealth])
@@ -93,7 +95,11 @@ object LeanBalancer extends LoadBalancerProvider {
     logging: Logging,
     materializer: ActorMaterializer): LoadBalancer = {
 
-    new LeanBalancer(whiskConfig, createFeedFactory(whiskConfig, instance), instance)
+    new LeanBalancer(
+      whiskConfig, 
+      createFeedFactory(whiskConfig, instance), 
+      createLoadFeedFactory(whiskConfig, instance), //avs
+      instance)
   }
 
   def requiredProperties =

@@ -43,6 +43,7 @@ import scala.util.{Failure, Success}
  */
 abstract class CommonLoadBalancer(config: WhiskConfig,
                                   feedFactory: FeedFactory,
+                                  loadFeedFactory: FeedFactory, // avs
                                   controllerInstance: ControllerInstanceId)(implicit val actorSystem: ActorSystem,
                                                                             logging: Logging,
                                                                             materializer: ActorMaterializer,
@@ -212,6 +213,17 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     }
   }
 
+// avs --begin
+  private val loadRespFeed: ActorRef =
+    loadFeedFactory.createFeed(actorSystem, messagingProvider, processLoadResponse)
+
+def processLoadResponse(bytes: Array[Byte]): Future[Unit] = Future{
+  val raw = new String(bytes, StandardCharsets.UTF_8)
+  //Future(LoadMessage.parse(val)))
+  logging.error(this, s"<avs_debug> <processLoadResponse> raw_message: ${raw}")
+  loadRespFeed ! MessageFeed.Processed
+}  
+// avs --end
   /** 5. Process the result ack and return it to the user */
   protected def processResult(response: Either[ActivationId, WhiskActivation], tid: TransactionId): Unit = {
     val aid = response.fold(l => l, r => r.activationId)

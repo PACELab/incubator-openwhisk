@@ -189,6 +189,35 @@ class InvokerReactive(
       case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
         send(Left(activationResult.activationId), recovery = true)
     }
+
+// avs --begin
+    def a_send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
+      //val msg: LoadMessage = LoadMessage(s"Insane execution of tid:  and tid : ${transid.asString}")
+      //val msg: String = "Insane execution of tid: "+transid.asString
+
+      val msg = if (isSlotFree) {
+        val aid = res.fold(identity, _.activationId)
+        val isWhiskSystemError = res.fold(_ => false, _.response.isWhiskError)
+        LoadMessage(s"Insane execution of aid : ${aid.asString}")
+        //CompletionMessage(transid, aid, isWhiskSystemError, instance)
+      } else {
+        LoadMessage(s"Insane execution of aid : but dunno what to do with result message")
+      }
+
+      producer.send(topic = "load-completed" + controllerInstance.asString, msg).andThen {
+        case Success(_) =>
+          logging.info(
+            this,
+            s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId}")
+      }
+    }
+
+    a_send(Right(if (blockingInvoke) activationResult else activationResult.withoutLogsOrResult)).recoverWith {
+      case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
+        a_send(Left(activationResult.activationId), recovery = true)
+    }    
+// avs --end
+
   }
 
   /** Stores an activation in the database. */
