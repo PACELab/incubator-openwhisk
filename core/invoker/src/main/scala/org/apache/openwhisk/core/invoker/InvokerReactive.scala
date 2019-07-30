@@ -57,7 +57,7 @@ object InvokerReactive extends InvokerProvider {
    * @param Boolean is true this is resource free message and false if this is a result forwarding message
    */
   type ActiveAck = (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID, Boolean) => Future[Any]
-
+  type ActiveLoadResp = (toRelayActionStats,Int) => Future[Any]
   override def instance(
     config: WhiskConfig,
     instance: InvokerInstanceId,
@@ -189,7 +189,7 @@ class InvokerReactive(
       case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
         send(Left(activationResult.activationId), recovery = true)
     }
-
+/*
 // avs --begin
     def a_send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
       //val msg: LoadMessage = LoadMessage(s"Insane execution of tid:  and tid : ${transid.asString}")
@@ -215,11 +215,25 @@ class InvokerReactive(
     a_send(Right(if (blockingInvoke) activationResult else activationResult.withoutLogsOrResult)).recoverWith {
       case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
         a_send(Left(activationResult.activationId), recovery = true)
-    }    
+    }  
+  
 // avs --end
-
+*/
   }
 
+
+// avs --begin
+  private val relayActionStats: InvokerReactive.ActiveLoadResp = (curActStats: toRelayActionStats,controllerID: Int) => {
+    logging.info(this, s"<avs_debug> <processLoadMessage> actName: ${curActStats.actionName}, avgLat: ${curActStats.avgLatency} numConts: ${curActStats.numConts}")
+    val msg: ActionStatsMessage = ActionStatsMessage(curActStats.actionName,curActStats.avgLatency,curActStats.numConts)
+    producer.send(topic = "load-completed" + controllerID, msg).andThen {
+        case Success(_) =>
+          logging.info(
+            this,
+            s"posted resp to loadRequest for aciton: ${curActStats.actionName} ")
+    }    
+  }
+// avs --end 
   /** Stores an activation in the database. */
   private val store = (tid: TransactionId, activation: WhiskActivation, context: UserContext) => {
     implicit val transid: TransactionId = tid
@@ -242,13 +256,14 @@ class InvokerReactive(
   }
   
   private val pool =
-    actorSystem.actorOf(ContainerPool.props(childFactory, poolConfig, activationFeed, prewarmingConfigs))
+    actorSystem.actorOf(ContainerPool.props(childFactory, poolConfig, activationFeed, prewarmingConfigs,relayActionStats))
 
 // avs --begin
 def processLoadMessage(bytes: Array[Byte]): Future[Unit] = Future{
   val raw = new String(bytes, StandardCharsets.UTF_8)
   //Future(LoadMessage.parse(val)))
-  logging.error(this, s"<avs_debug> <processLoadMessage> raw_message: ${raw}")
+  logging.info(this, s"<avs_debug> <processLoadMessage> raw_message: ${raw}")
+  pool ! getAllLatency("imageResizing_v1",0) // WARNING/TODO: should implement this as parameters, once the message from load is finalized!
   a_activationFeed ! MessageFeed.Processed
 }
 // avs --end

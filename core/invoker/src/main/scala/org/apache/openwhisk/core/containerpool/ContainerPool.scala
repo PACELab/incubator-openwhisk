@@ -29,6 +29,7 @@ import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.util.Try
 import scala.collection.mutable.ListBuffer //avs
+import org.apache.openwhisk.core.invoker.InvokerReactive.ActiveLoadResp
 
 sealed trait WorkerState
 case object Busy extends WorkerState
@@ -43,17 +44,21 @@ class contStatsData(var cpuShares: Int,val trackContId:Int){
   var numTimesUsed: Int = 0
 }
 
+class toRelayActionStats(val actionName: String,val avgLatency: Long,val numConts: Int){
+}
+
 class funcConfigTracking(
   var actionName: String, 
   val curId: TransactionId, 
   val myFuncStats: TrackFunctionStats,
-  private val logging: AkkaLogging,
+  private val logging: AkkaLogging
 ){
 
   //import ContainerPool.getActionType
   var myContainers = mutable.Map.empty[Container, contStatsData]
   val defaultCpuShares = 32
   var curCpuShares = defaultCpuShares
+  var avgLatency: Long = 0
 
   def getDefaultCpuShares(): Int = {
     defaultCpuShares
@@ -70,6 +75,11 @@ class funcConfigTracking(
     }
   }
 
+  def getCurAvgLatency(): Long = {
+    logging.info(this, s"<avs_debug> <funcConfigTracking> <getCurAvgLatency> for action: ${actionName} avgLatency: ${avgLatency} and numConts: ${numContainerTracked}!")
+    avgLatency
+  }
+
   def getCurContID(container: Container): Int = {
     myContainers.get(container) match {
       case Some(myContStats) => 
@@ -80,23 +90,29 @@ class funcConfigTracking(
     }
   }
 
-  def setCurCpuShares(container: Container,toSetCpuShares: Int): Unit = {
+  def setCurCpuShares(container: Container,toSetCpuShares: Int,toSetAvgLatency: Long): Unit = {
     myContainers.get(container) match {
       case Some(myContStats) => 
         myContStats.cpuShares = toSetCpuShares
+        if(toSetAvgLatency>0){ // ok it's not an update coming during rebalancing of cpushares, since it's non-zero.
+          avgLatency = toSetAvgLatency
+        }else{ // ok avg latency is 0.
+          if(numContainerTracked()==0) // ok, we have no containers, so avgLatency has to be zero!
+            avgLatency = toSetAvgLatency
+          // else --> it's coming during rebalancing and is a placeholder value, so won't update it!
+        }
         myContStats.numTimesUsed+=1
         //logging.info(this, s"<avs_debug> <funcConfigTracking> <setCurCpuShares> for action: ${actionName} myContStats.cpuShares (updated): ${myContStats.cpuShares} and id: ${myContStats.trackContId} and is used: ${myContStats.numTimesUsed}")
       case None => 
         logging.info(this, s"<avs_debug> <funcConfigTracking> <setCurCpuShares> for action: ${actionName} container missing. HANDLE it!")
-    
     }
   }
 
-  def addContainer(container: Container,curCpuShares:Int,trackContId:Int): Int = {
+  def addContainer(container: Container,curCpuShares:Int,trackContId:Int,toSetAvgLatency: Long): Int = {
     //myContainers+= container;    
     myContainers.get(container) match {
       case Some(e) => 
-        setCurCpuShares(container,curCpuShares)
+        setCurCpuShares(container,curCpuShares,toSetAvgLatency)
         trackContId // not updating the trackContId
       case None => 
         logging.info(this, s"<avs_debug> <funcConfigTracking> <addContainer> for action: ${actionName} adding a container")
@@ -120,7 +136,6 @@ class funcConfigTracking(
       curCpuShares = defaultCpuShares // can set this to most-used-cpu-shares
     }
   }
-
 
   def printAllContainers(): Unit = {
     myContainers.keys.foreach{ curCont =>
@@ -164,7 +179,6 @@ class TrackFunctionStats(
   //import ContainerPool.printAllCpuShares
 
   private var cumulRuntime: Long = 0;
-  private var numInvocations: Long = 0;
   //private var curCpuShares: Int = 0;
   private var curCpuSharesUsed: Int = -1;
   private var allCpuShares: ListBuffer[Int] = new mutable.ListBuffer[Int];
@@ -223,7 +237,6 @@ class TrackFunctionStats(
   // It keeps track of CPU shares as a finite resource in a node (i.e. 1024 * num-cores) and also takes care of reducing CPU shares when needed.
   def checkCpuShares(curRuntime: Long): Unit = {
 
-    numReqsProcessed+=1
     if(updateCount_Flag)
       curCpuSharesUsed+=1
 
@@ -243,7 +256,7 @@ class TrackFunctionStats(
     if( numViolations >= violationThreshold ){
         numViolations = 0
 
-      //logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}; cumulRuntime: ${cumulRuntime} and #invocations: ${numInvocations}")  
+      //logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName} curRuntime: ${curRuntime} is greater than 120% of myStandaloneRuntime: ${myStandaloneRuntime}; cumulRuntime: ${cumulRuntime}")  
       // all hell will break loose if multiple containers of the same type call this at the same time!
       var curNumConts = if(numContainerTracked()!=0) numContainerTracked() else 1;
       var avgNumtimeUsed = (curCpuSharesUsed/(curNumConts))
@@ -310,8 +323,9 @@ class TrackFunctionStats(
 
   def addRuntime(curRuntime: Long): Unit = {  
     cumulRuntime+= curRuntime
-    numInvocations+=1
-    //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numInvocations: ${numInvocations}")
+    numReqsProcessed+=1
+
+    logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numReqsProcessed: ${numReqsProcessed}")
     dummyCall()
     //checkCpuShares(curRuntime)
     //if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)) printAllCpuShares(logging)
@@ -342,6 +356,8 @@ class TrackFunctionStats(
     if(myContainers.size==0){
       logging.info(this, s"<avs_debug> <TrackFunctionStats> <removeContainer> for action: ${actionName} don't have any containers. Will reset curCpuShares: ${curCpuShares} to defaultCpuShares: ${defaultCpuShares} ")
       curCpuShares = defaultCpuShares // can set this to most-used-cpu-shares
+      cumulRuntime = 0
+      numReqsProcessed = 0
     }
   }
 
@@ -351,6 +367,15 @@ class TrackFunctionStats(
     else myContainers.size
   }
 
+  def getAverageRuntime(): Long ={
+    if(numReqsProcessed!=0) {
+      logging.info(this, s"<avs_debug> <TrackFunctionStats> <getAverageRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} and numReqsProcessed: ${numReqsProcessed} avgLatency: ${cumulRuntime/numReqsProcessed}")
+      cumulRuntime/numReqsProcessed
+    }else{
+      0
+    }
+
+  }
 }
 // avs --end
 
@@ -377,9 +402,12 @@ class TrackFunctionStats(
 class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                     feed: ActorRef,
                     prewarmConfig: List[PrewarmingConfig] = List.empty,
-                    poolConfig: ContainerPoolConfig)
+                    poolConfig: ContainerPoolConfig,
+                    relayActionStats: ActiveLoadResp // avs
+                  )
     extends Actor {
   import ContainerPool.memoryConsumptionOf
+  import ContainerPool.getCurActionStats // avs
   //import ContainerPool.cpuSharesConsumptionOf
   import ContainerPool.cpuSharesCheck
   implicit val logging = new AkkaLogging(context.system.log)
@@ -620,21 +648,23 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       //avs --begin
       // WARNING: Pending, removing the member when container is removed.
       var toUseCpuShares = 0
+      var curAvgLatency: Long = 0
       avgActionRuntime.get(warmData.action.name.asString) match {
         case Some(curActStats) => 
           //logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in avgActionRuntime and a new container is being added to it. ")
           curActStats.addContainer(warmData.container)  
           toUseCpuShares = curActStats.getCurCpuShares()
+          curAvgLatency = curActStats.getAverageRuntime()
 
           cpuSharesPool.get(warmData.action.name.asString) match {
             case Some(curActFuncTracking) => 
-              trackContId = curActFuncTracking.addContainer(warmData.container,toUseCpuShares,trackContId) // will update contId, if 
+              trackContId = curActFuncTracking.addContainer(warmData.container,toUseCpuShares,trackContId,curAvgLatency) // will update contId, if 
               //logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is present in cpuSharesPool and container (trackContId: ${trackContId-1} and cpuShares: ${toUseCpuShares}) being updated to it.!")
             case None => 
               // (actor -> new funcConfigTracking(r.action.name.asString,trackContId,newData,r.msg.transid,poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)))              
               cpuSharesPool = cpuSharesPool + (warmData.action.name.asString -> new funcConfigTracking(warmData.action.name.asString,curActStats.getCurTxnId(),curActStats,logging))
               var myConfigTracking :funcConfigTracking = cpuSharesPool(warmData.action.name.asString)
-              trackContId = myConfigTracking.addContainer(warmData.container,toUseCpuShares,trackContId) 
+              trackContId = myConfigTracking.addContainer(warmData.container,toUseCpuShares,trackContId,curAvgLatency) 
               logging.info(this, s"<avs_debug> <InNeedWork> actionName: ${warmData.action.name.asString} is NOT present in cpuSharesPool and a new container (trackContId: ${trackContId-1} and cpuShares: ${toUseCpuShares}) being added to it.!")
           }
 
@@ -704,6 +734,14 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           logging.info(this, s"<avs_debug> <RemoveContTracking> actionName: ${actionName} was NOT present in avgActionRuntime and hence nothing is being done, HANDLE it! ")
 
       }         
+
+    case getAllLatency(curActName: String,controllerID: Int) =>
+      logging.info(this, s"<avs_debug> <getAllLatency> start-getCurActionStats ")
+      //var curActStatsMessage : ActionStatsMessage = getCurActionStats(curActName,logging)
+      var curActStats : toRelayActionStats = getCurActionStats(curActName,logging)
+      relayActionStats(curActStats,controllerID)
+      logging.info(this, s"<avs_debug> <getAllLatency> end-getCurActionStats ")
+      
 
     //avs --end
   }
@@ -886,7 +924,7 @@ object ContainerPool {
           if(updatedCpuShares >= myConfig.getDefaultCpuShares()){
             logging.info(this, s"<avs_debug><rebalanceCpuShares> Going to update my CPUSHARES. actName: ${myConfig.actionName} my id: ${myConfig.getCurContID(curCont)} and my cpuShares is ${myConfig.getCurCpuShares(curCont)} and updatedCpuShares: ${updatedCpuShares}")                    
             curCont.updateCpuShares(myConfig.curId,updatedCpuShares)
-            myConfig.setCurCpuShares(curCont,updatedCpuShares)            
+            myConfig.setCurCpuShares(curCont,updatedCpuShares,0)            
           }else{
             logging.info(this, s"<avs_debug><rebalanceCpuShares> NOTT going to update my cpushares. actName: ${myConfig.actionName} my id: ${myConfig.getCurContID(curCont)} and my cpuShares is ${myConfig.getCurCpuShares(curCont)} and updatedCpuShares: ${updatedCpuShares}")                    
           }
@@ -900,6 +938,41 @@ object ContainerPool {
     }
 
   }
+
+  def getCurActionStats(curActName: String, logging: AkkaLogging): toRelayActionStats = {
+    var pool: Map[String,funcConfigTracking] = cpuSharesPool;
+    
+    /* var allLatencyData = new mutable.ListBuffer[toRelayActionStats]
+    pool.keys.foreach{ curActName =>
+      var myConfig: funcConfigTracking = pool(curActName)
+      var tempAvgLatency = myConfig.getCurAvgLatency()
+      var tempNumConts = myConfig.numContainerTracked()
+      logging.info(this, s"<avs_debug><getCurActionStats> <initData> action: ${curActName} tempAvgLatency: ${tempAvgLatency} tempNumConts: ${tempNumConts}  ")      
+      //var tempActStats: toRelayActionStats = new toRelayActionStats(curActName, myConfig.getCurAvgLatency(), myConfig.numContainerTracked())
+      var tempActStats: toRelayActionStats = new toRelayActionStats(curActName, tempAvgLatency, tempNumConts)
+      allLatencyData+= tempActStats
+
+    }
+
+    logging.info(this, s"<avs_debug><getCurActionStats> BEGIN *************** ")      
+    //class toRelayActionStats(val actionName: Int,val avgLatency: Int,val numConts: Int)
+    allLatencyData.foreach{ curLatData =>
+      logging.info(this, s"<avs_debug><getCurActionStats> <allLatencyData> action: ${curLatData.actionName} numConts: ${curLatData.numConts} avgLatency: ${curLatData.avgLatency} ")      
+    }
+    logging.info(this, s"<avs_debug><getCurActionStats> End: ${tempCpuShares} *************** ")      */
+
+    cpuSharesPool.get(curActName) match {
+      case Some(myConfig) =>
+        var tempAvgLatency = myConfig.getCurAvgLatency()
+        var tempNumConts = myConfig.numContainerTracked()
+        //ActionStatsMessage(curActName,tempAvgLatency,tempNumConts)
+        logging.info(this, s"<avs_debug><getCurActionStats> <initData> action: ${curActName} tempAvgLatency: ${tempAvgLatency} tempNumConts: ${tempNumConts}  ")      
+        new toRelayActionStats(curActName, tempAvgLatency, tempNumConts)
+      case None =>
+        //ActionStatsMessage(curActName,0,0)
+        new toRelayActionStats(curActName, 0, 0)
+    }
+  }  
 
   /**
    * Calculate the cpuShares of a given pool.
@@ -1000,8 +1073,10 @@ object ContainerPool {
   def props(factory: ActorRefFactory => ActorRef,
             poolConfig: ContainerPoolConfig,
             feed: ActorRef,
-            prewarmConfig: List[PrewarmingConfig] = List.empty) =
-    Props(new ContainerPool(factory, feed, prewarmConfig, poolConfig))
+            prewarmConfig: List[PrewarmingConfig] = List.empty,
+            relayActionStats: ActiveLoadResp
+          ) =
+    Props(new ContainerPool(factory, feed, prewarmConfig, poolConfig,relayActionStats))
 }
 
 /** Contains settings needed to perform container prewarming. */

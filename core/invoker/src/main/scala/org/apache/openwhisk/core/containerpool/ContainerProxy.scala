@@ -179,6 +179,7 @@ case object RunCompleted
 
 case class UpdateStats(actionName: String,runtime: Long) //avs
 case class RemoveContTracking(container: Container, actionName: String) //avs
+case class getAllLatency(curActName: String,controllerID: Int)
 
 /**
  * A proxy that wraps a Container. It is used to keep track of the lifecycle

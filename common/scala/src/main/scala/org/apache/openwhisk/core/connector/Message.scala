@@ -87,6 +87,21 @@ object LoadMessage extends DefaultJsonProtocol {
   //def parse(msg: String) = Try(msg)
   implicit val serdes = jsonFormat(LoadMessage.apply _, "myStr")
 }
+
+case class ActionStatsMessage(val curActName: String,val avgLatency: Long,val numConts: Int) extends Message{
+  override def serialize = ActionStatsMessage.serdes.write(this).compactPrint
+
+  override def toString = {
+    //val value = (content getOrElse JsObject.empty).compactPrint
+    s"action: ${curActName} numConts: ${numConts} avgLatency: ${avgLatency}"
+  }  
+}
+
+object ActionStatsMessage extends DefaultJsonProtocol {
+  def parse(msg: String): Try[ActionStatsMessage] = Try(serdes.read(msg.parseJson))
+  implicit val serdes = jsonFormat3(ActionStatsMessage.apply)
+}
+
 // avs --end
 
 /**
