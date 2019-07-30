@@ -181,9 +181,9 @@ class TrackFunctionStats(
   private var shouldEaseup: Boolean = false;
 
   private var perIterIncrement = if(myActionType=="ET") 128 else 64
-  private var maxCpuShares = if(myActionType=="ET") 1024 else 512
+  private var maxCpuShares = if(myActionType=="ET") 768 else 512
 
-  private var numReqsProcessed = 0
+  private var numReqsProcessed = 1 // should be zero, but to debug have set it to 1.
   private var trackSharesUsed = mutable.Map.empty[Int,Int] // <num-shares>,<num-times-used>
   trackSharesUsed = trackSharesUsed + (defaultCpuShares -> 0)
 
