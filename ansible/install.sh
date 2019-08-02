@@ -3,7 +3,7 @@ ansible all -i environments/distributed -m ping
 ansible-playbook -i environments/distributed setup.yml
 echo "Commented docker in prereq_build.yml"
 #ansible-playbook -i environments/distributed prereq.yml 
-#ansible-playbook -i environments/distributed registry.yml
+ansible-playbook -i environments/distributed registry.yml
 #cd ../ && ./gradlew distDocker -PdockerRegistry=serverless-dev1:5000
 #cd ansible
 ansible-playbook -i environments/distributed couchdb.yml

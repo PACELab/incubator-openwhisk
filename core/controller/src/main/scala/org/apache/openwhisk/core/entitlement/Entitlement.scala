@@ -32,7 +32,7 @@ import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.connector.{EventMessage, Metric}
 import org.apache.openwhisk.core.controller.RejectRequest
 import org.apache.openwhisk.core.entity._
-import org.apache.openwhisk.core.loadBalancer.{LoadBalancer, ShardingContainerPoolBalancer}
+import org.apache.openwhisk.core.loadBalancer.{LoadBalancer, ShardingContainerPoolBalancer,AdaptiveContainerPoolBalancer,RoundRobinContainerPoolBalancer}
 import org.apache.openwhisk.http.ErrorResponse
 import org.apache.openwhisk.http.Messages
 import org.apache.openwhisk.core.connector.MessagingProvider
@@ -144,6 +144,8 @@ protected[core] abstract class EntitlementProvider(
   private val activationThrottleCalculator = loadBalancer match {
     // This loadbalancer applies sharding and does not share any state
     case _: ShardingContainerPoolBalancer => calculateIndividualLimit _
+    case _: AdaptiveContainerPoolBalancer => calculateIndividualLimit _
+    case _: RoundRobinContainerPoolBalancer => calculateIndividualLimit _
     // Activation relevant data is shared by all other loadbalancers
     case _ => calculateLimit _
   }

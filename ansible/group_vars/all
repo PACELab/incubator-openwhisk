@@ -68,6 +68,7 @@ limits:
 # Moved here to avoid recursions. Please do not use outside of controller-dict.
 __controller_ssl_keyPrefix: "controller-"
 __controller_blackbox_fraction: 1.0 #0.10
+__avs_loadbalancer: "org.apache.openwhisk.core.loadBalancer.RoundRobinContainerPoolBalancer"
 
 # port means outer port
 controller:
@@ -91,7 +92,8 @@ controller:
       # at this moment all controllers are seed nodes
       seedNodes: "{{ groups['controllers'] | map('extract', hostvars, 'ansible_host') | list }}"
   loadbalancer:
-    spi: "{{ controller_loadbalancer_spi | default('') }}"
+    //spi: "{{ controller_loadbalancer_spi | default('') }}"
+    spi: "{{ controller_loadbalancer_spi | default(__avs_loadbalancer) }}" # avs
   authentication:
     spi: "{{ controller_authentication_spi | default('') }}"
   loglevel: "{{ controller_loglevel | default(whisk_loglevel) | default('INFO') }}"
