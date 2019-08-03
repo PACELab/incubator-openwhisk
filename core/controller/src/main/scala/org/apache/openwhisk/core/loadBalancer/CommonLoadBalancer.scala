@@ -38,7 +38,9 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 import scala.collection.mutable //avs
+//import scala.collection.mutable.ListBuffer
 //import scala.collection.immutable //avs
+
 
 /**
  * Abstract class which provides common logic for all LoadBalancer implementations.
@@ -65,7 +67,10 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
 
   protected val invokerPool: ActorRef
 
-  protected[loadBalancer] var curRunningActions = mutable.Map.empty[String, PerInvokerActionStats]
+  protected[loadBalancer] var curRunningActions = mutable.Map.empty[String, PerInvokerActionStats] // avs
+  
+  var allInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]//avs
+  //invoker.myStats.addAction(actionName,logging)  
 
   /** State related to invocations and throttling */
   protected[loadBalancer] val activationSlots = TrieMap[ActivationId, ActivationEntry]()
@@ -179,14 +184,14 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     }
 
     // avs --begin
-    val a_topic = s"load-invoker${invoker.toInt}"
+    /*val a_topic = s"load-invoker${invoker.toInt}"
     val a_msg: LoadMessage = LoadMessage(s"SanityCheck${invoker.toInt} and activID : ${msg.activationId}")
     producer.send(a_topic, a_msg).andThen {
       case Success(status) =>
         logging.info(this, s"<avs_debug> On topic: ${a_topic} SUCCESSFULLY posted message: ${a_msg} ")
       case Failure(_) => 
         logging.info(this, s"<avs_debug> On topic: ${a_topic} DIDNOT post message: ${a_msg} ")
-    }    
+    } */   
     // avs --end
   }
 
@@ -225,32 +230,51 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   }
 
 // avs --begin
+
+  type aitype = (InvokerHealth,Int,Int) => Unit
+  val aIT: aitype = (invoker: InvokerHealth,numCores:Int,memorySize:Int) => {
+  //def addInvokerTracking(invoker: InvokerInstanceId,numCores:Int,memorySize:Int): Unit = {
+    logging.info(this,s"<avs_debug> <addInvokerTracking> on invoker: ${invoker.id.toInt}")
+    allInvokers.get(invoker.id) match {
+      case Some(curInvokerStats) =>
+        logging.info(this,s"<avs_debug> in <addInvokerTracking> invoker: ${invoker.id.toInt} is PRESENT in allInvokers ")
+      case None =>
+        allInvokers = allInvokers + (invoker.id -> new AdapativeInvokerStats(invoker.id,invoker.status) )
+        logging.info(this,s"<avs_debug> in <addInvokerTracking> invoker: ${invoker.id.toInt} is ABSENT in allInvokers ")
+        var tempInvokerStats = allInvokers(invoker.id)
+        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+      } 
+  }  
+
+  type cicType = (InvokerHealth) => Boolean 
+  val cIC: cicType = (invoker: InvokerHealth) => {
+    //def checkInvokerCapacity(invoker: InvokerInstanceId): Boolean = {
+    logging.info(this,s"<avs_debug> <checkInvokerCapacity> on invoker: ${invoker.id.toInt}")
+    allInvokers.get(invoker.id) match {
+      case Some(curInvokerStats) =>
+        logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is PRESENT in allInvokers ")
+        curInvokerStats.capacityRemaining()
+      case None =>
+        allInvokers = allInvokers + (invoker.id -> new AdapativeInvokerStats(invoker.id,invoker.status) )
+        logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is ABSENT in allInvokers ")
+        var tempInvokerStats = allInvokers(invoker.id)
+        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+        tempInvokerStats.capacityRemaining()
+      } 
+  }
   private val loadRespFeed: ActorRef =
     loadFeedFactory.createFeed(actorSystem, messagingProvider, processLoadResponse)
 
   protected[loadBalancer] def processLoadResponse(bytes: Array[Byte]): Future[Unit] = Future{
     logging.info(this, s"<avs_debug> <processLoadResponse> 1")
     val raw = new String(bytes, StandardCharsets.UTF_8)
-    //Future(LoadMessage.parse(val)))
-    //val msg: ActionStatsMessage = ActionStatsMessage(curActStats.actionName,curActStats.avgLatency,curActStats.numConts)
-    //val msg: ActionStatsMessage = ActionStatsMessage.parse(raw)
-    /*val curActName: String,
-                              val avgLatency: Long,
-                              val numConts: Int
-    */
-    /*LoadMessage.parse(raw) match {
-      case Success(m: LoadMessage) =>
-        logging.info(this,s"<avs_debug> <processLoadResponse> LoadMessage successfully parsed! m.Str: ${m.toString}")
-      case Failure(t) =>
-        logging.info(this,s"<avs_debug> <processLoadResponse> LoadMessage wasn't parsed! raw: ${raw}")
-    }*/
 
     ActionStatsMessage.parse(raw) match {
       case Success(m: ActionStatsMessage) =>
         logging.info(this,s"<avs_debug> <processLoadResponse> ActionStatsMessage successfully parsed! m.Str: ${m.toString}")
         curRunningActions.get(m.curActName) match {
           case Some(curActStats) => 
-            logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is PRESENT in curRunningActions")
+            logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is PRESENT in curRunningActions and it ran on invoker: ${m.invoker.toInt}")
             curActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
           case None => 
             logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is ABSENT in curRunningActions")

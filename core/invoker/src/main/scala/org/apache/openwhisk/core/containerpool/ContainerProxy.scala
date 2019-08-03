@@ -177,9 +177,9 @@ case class PreWarmCompleted(data: PreWarmedData)
 case class InitCompleted(data: WarmedData)
 case object RunCompleted
 
-case class UpdateStats(actionName: String,runtime: Long) //avs
+case class UpdateStats(actionName: String,controllerID: ControllerInstanceId,runtime: Long) //avs
 case class RemoveContTracking(container: Container, actionName: String) //avs
-case class getAllLatency(curActName: String,controllerID: Int)
+case class getAllLatency(curActName: String,controllerID: Int)// avs should change controllerID to ControllerInstanceId type, will do it when getAllLatency will be turned into to a sensible request -- should pass controllerID from LB while sending a request
 
 /**
  * A proxy that wraps a Container. It is used to keep track of the lifecycle
@@ -236,6 +236,7 @@ class ContainerProxy(
   var numActivationsServed = 0;
   var prevActivationTime : Long = 0;
   var prevActivationInitTime : Long =0;
+  var prevActivationControllerID: ControllerInstanceId = new ControllerInstanceId(s"0");
   // avs --end
   //keep a separate count to avoid confusion with ContainerState.activeActivationCount that is tracked/modified only in ContainerPool
   var activeCount = 0;
@@ -367,10 +368,9 @@ class ContainerProxy(
       activeCount -= 1
       //context.parent ! UpdateStats(numActivationsServed) //avs 
       if(prevActivationInitTime == 0) 
-        context.parent ! UpdateStats(data.action.name.asString,prevActivationTime) //avs 
+        context.parent ! UpdateStats(data.action.name.asString,prevActivationControllerID,prevActivationTime) //avs 
       prevActivationTime = 0;//avs
       prevActivationInitTime = 0// avs
-
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay
       if (requestWork(data) || activeCount > 0) {
         stay using data
@@ -669,6 +669,7 @@ class ContainerProxy(
           // avs --start
           numActivationsServed = numActivationsServed+1; //avs
           prevActivationTime = activation.duration getOrElse 0;
+          prevActivationControllerID = job.msg.rootControllerIndex
           prevActivationInitTime = activation.annotations.getAs[Long](WhiskActivation.initTimeAnnotation).getOrElse(0) //activation.initTimeAnnotation getOrElse -1
           //logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed} prevActivationInitTime: ${prevActivationInitTime} "); //avs 
           // WARNING: not sure whether this could break it, if there are some errors. 

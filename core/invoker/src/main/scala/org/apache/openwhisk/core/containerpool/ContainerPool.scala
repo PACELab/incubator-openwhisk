@@ -705,7 +705,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       busyPool = busyPool - sender()
 
     //avs --begin
-    case UpdateStats(actionName: String,runtime: Long) => 
+    //case UpdateStats(actionName: String,controllerID: Int,runtime: Long) => 
+  case UpdateStats(actionName: String,controllerID: ControllerInstanceId,runtime: Long) =>
       avgActionRuntime.get(actionName) match {
         case Some(curActTrackedStats) => 
           //avgActionRuntime(actionName).addRuntime(runtime)         
@@ -715,6 +716,10 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
           logging.info(this, s"<avs_debug> 2. UpdateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly, HANDLE it!");         
       }     
+      // Not sure whether I want to always send it back, for now, assuming that this is the design we will stick with.
+      var curActStats : toRelayActionStats = getCurActionStats(actionName,logging)
+      relayActionStats(curActStats,controllerID.asString)
+      logging.info(this, s"<avs_debug> <UpdateStats> end-getCurActionStats ")
 
     case RemoveContTracking(container: Container, actionName: String) => 
 
@@ -739,9 +744,8 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       logging.info(this, s"<avs_debug> <getAllLatency> start-getCurActionStats ")
       //var curActStatsMessage : ActionStatsMessage = getCurActionStats(curActName,logging)
       var curActStats : toRelayActionStats = getCurActionStats(curActName,logging)
-      relayActionStats(curActStats,controllerID)
+      relayActionStats(curActStats,controllerID.toString)
       logging.info(this, s"<avs_debug> <getAllLatency> end-getCurActionStats ")
-      
 
     //avs --end
   }

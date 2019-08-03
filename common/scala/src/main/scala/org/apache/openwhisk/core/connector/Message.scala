@@ -101,9 +101,11 @@ object Metric extends DefaultJsonProtocol {
 }  
 */  
 
-case class ActionStatsMessage(val curActName: String,
-                              val avgLatency: Long,
-                              val numConts: Int) extends Message{
+case class ActionStatsMessage(curActName: String,
+                              avgLatency: Long,
+                              numConts: Int,
+                              invoker: InvokerInstanceId,
+                            ) extends Message{
   override def toString = {
     s"action: ${curActName} numConts: ${numConts} avgLatency: ${avgLatency}"
   }  
@@ -114,7 +116,7 @@ case class ActionStatsMessage(val curActName: String,
 object ActionStatsMessage extends DefaultJsonProtocol {
   def parse(msg: String): Try[ActionStatsMessage] = Try(serdes.read(msg.parseJson))
   //implicit val serdes = jsonFormat3(ActionStatsMessage.apply)
-  implicit val serdes = jsonFormat(ActionStatsMessage.apply _, "curActName","avgLatency","numConts")
+  implicit val serdes = jsonFormat(ActionStatsMessage.apply _, "curActName","avgLatency","numConts","invoker")
 }
 
 // avs --end

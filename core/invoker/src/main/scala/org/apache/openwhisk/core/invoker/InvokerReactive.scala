@@ -57,7 +57,7 @@ object InvokerReactive extends InvokerProvider {
    * @param Boolean is true this is resource free message and false if this is a result forwarding message
    */
   type ActiveAck = (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID, Boolean) => Future[Any]
-  type ActiveLoadResp = (toRelayActionStats,Int) => Future[Any]
+  type ActiveLoadResp = (toRelayActionStats,String) => Future[Any]
   override def instance(
     config: WhiskConfig,
     instance: InvokerInstanceId,
@@ -189,60 +189,22 @@ class InvokerReactive(
       case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
         send(Left(activationResult.activationId), recovery = true)
     }
-/*
-// avs --begin
-    def a_send(res: Either[ActivationId, WhiskActivation], recovery: Boolean = false) = {
-      //val msg: LoadMessage = LoadMessage(s"Insane execution of tid:  and tid : ${transid.asString}")
-      //val msg: String = "Insane execution of tid: "+transid.asString
-
-      val msg = if (isSlotFree) {
-        val aid = res.fold(identity, _.activationId)
-        val isWhiskSystemError = res.fold(_ => false, _.response.isWhiskError)
-        LoadMessage(s"Insane execution of aid : ${aid.asString}")
-        //CompletionMessage(transid, aid, isWhiskSystemError, instance)
-      } else {
-        LoadMessage(s"Insane execution of aid : but dunno what to do with result message")
-      }
-
-      producer.send(topic = "load-completed" + controllerInstance.asString, msg).andThen {
-        case Success(_) =>
-          logging.info(
-            this,
-            s"posted ${if (recovery) "recovery" else "completion"} of activation ${activationResult.activationId}")
-      }
-    }
-
-    a_send(Right(if (blockingInvoke) activationResult else activationResult.withoutLogsOrResult)).recoverWith {
-      case t if t.getCause.isInstanceOf[RecordTooLargeException] =>
-        a_send(Left(activationResult.activationId), recovery = true)
-    }  
-  
-// avs --end
-*/
   }
 
 // avs --begin
-  private val relayActionStats: InvokerReactive.ActiveLoadResp = (curActStats: toRelayActionStats,controllerID: Int) => {
+  private val relayActionStats: InvokerReactive.ActiveLoadResp = (curActStats: toRelayActionStats,controllerIDStr: String) => {
     var printMsg = s"<avs_debug> <processLoadMessage> actName: ${curActStats.actionName}, avgLat: ${curActStats.avgLatency} numConts: ${curActStats.numConts}"
     logging.info(this, printMsg)
-    val msg: ActionStatsMessage = ActionStatsMessage(curActStats.actionName,curActStats.avgLatency,curActStats.numConts)
-    producer.send(topic = "load-completed" + controllerID, msg).andThen {
+    val msg: ActionStatsMessage = ActionStatsMessage(curActStats.actionName,curActStats.avgLatency,curActStats.numConts,instance)
+    producer.send(topic = "load-completed" + controllerIDStr, msg).andThen {
         case Success(_) =>
           logging.info(this,s" <avs_debug> <Success-1> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg.toString} ")
         case Failure(_) =>
           logging.info(this,s" <avs_debug> <Failure-1> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg.toString} ")
-    }     
-
-    /*val msg2: LoadMessage = LoadMessage(printMsg)
-    producer.send(topic = "load-completed" + controllerID, msg2).andThen {
-        case Success(_) =>
-          logging.info(this,s" <avs_debug> <Success-2> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg2.toString} ")
-        case Failure(_) =>
-          logging.info(this,s" <avs_debug> <Failure-2> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg2.toString} ")
-    } */    
-
+    }       
   }
 // avs --end 
+
   /** Stores an activation in the database. */
   private val store = (tid: TransactionId, activation: WhiskActivation, context: UserContext) => {
     implicit val transid: TransactionId = tid

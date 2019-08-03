@@ -154,7 +154,8 @@ class AdaptiveContainerPoolBalancer(
   materializer: ActorMaterializer)
     extends CommonLoadBalancer(config, feedFactory, loadFeedFactory,controllerInstance) { 
 //extends CommonLoadBalancer(config, feedFactory,controllerInstance) // avs added loadFeedFactory
-  private var prevInvokerUsed = -1; // will be helpful for round-robin
+  private var prevInvokerUsed = -1; // avs //will be helpful for round-robin
+  //import loadBalancer.allInvokers //avs
 
   /** Build a cluster of all loadbalancers */
   private val cluster: Option[Cluster] = if (loadConfigOrThrow[ClusterConfig](ConfigKeys.cluster).useClusterBootstrap) {
@@ -225,7 +226,7 @@ class AdaptiveContainerPoolBalancer(
 
     override def receive: Receive = {
       case CurrentInvokerPoolState(newState) =>
-        schedulingState.updateInvokers(newState)
+        schedulingState.updateInvokers(newState,aIT)
 
       // State of the cluster as it is right now
       case CurrentClusterState(members, _, _, _, _) =>
@@ -281,7 +282,8 @@ class AdaptiveContainerPoolBalancer(
         action.limits.memory.megabytes,
         homeInvoker,
         stepSize,
-        msg.action.asString)
+        msg.action.asString,
+        cIC)
       invoker.foreach {
         case (_, true) =>
           val metric =
@@ -305,6 +307,7 @@ class AdaptiveContainerPoolBalancer(
           s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to $invoker and prevInvokerUsed: ${prevInvokerUsed}")        
         val activationResult = setupActivation(msg, action, invoker)
         sendActivationToInvoker(messageProducer, msg, invoker).map(_ => activationResult)
+
       }
       .getOrElse {
         // report the state of all invokers
@@ -408,19 +411,20 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
     index: Int,
     step: Int,
     actionName: String,
+    checkInvokerCapacity: (InvokerHealth) => Boolean, //avs
     stepsDone: Int = 0
   )(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
     val numInvokers = invokers.size
 
     if (numInvokers > 0) {
       val invoker = invokers(index)
+
       logging.info(this,s"<avs_debug> <schedule> 0. stepsDone: ${stepsDone} numInvokers: ${numInvokers} invoker: ${invoker.id.toInt}") // avs
       //test this invoker - if this action supports concurrency, use the scheduleConcurrent function
       if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquireConcurrent(fqn, maxConcurrent, slots)) {
-        logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt} and myNumCores: ${invoker.myStats.myResources.numCores}") // avs
-        if(invoker.myStats.capacityRemaining){
-          logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt} and myNumCores: ${invoker.myStats.myResources.numCores} adding action: ${actionName} now..") // avs
-          invoker.myStats.addAction(actionName,logging)  
+        logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
+        if(checkInvokerCapacity(invoker)){
+          logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
         }
         Some(invoker.id, false)  
       } else {
@@ -442,7 +446,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
         } else {
           val newIndex = (index + step) % numInvokers
           logging.info(this,s"<avs_debug> <schedule> 3. <another-call-to-schedule> stepsDone: ${stepsDone} newIndex: ${newIndex} maxConcurrent: ${maxConcurrent}") // avs
-          schedule(maxConcurrent, fqn, invokers, dispatched, slots, newIndex, step, actionName,stepsDone + 1)
+          schedule(maxConcurrent, fqn, invokers, dispatched, slots, newIndex, step, actionName,checkInvokerCapacity,stepsDone + 1)
         }
       }
     } else {
@@ -521,7 +525,10 @@ case class AdaptiveContainerPoolBalancerState(
    *
    * It is important that this method does not run concurrently to itself and/or to [[updateCluster]]
    */
-  def updateInvokers(newInvokers: IndexedSeq[InvokerHealth]): Unit = {
+  def updateInvokers(
+    newInvokers: IndexedSeq[InvokerHealth],
+    //checkInvokerCapacity: (InvokerInstanceId) => Boolean
+    addInvokerTracking: (InvokerHealth,Int,Int) => Unit): Unit = {
     val oldSize = _invokers.size
     val newSize = newInvokers.size
 
@@ -535,12 +542,13 @@ case class AdaptiveContainerPoolBalancerState(
     _blackboxInvokers = _invokers.takeRight(blackboxes)
 
     // avs --begin
-    var tempNumCores = 10;
+    var tempNumCores = 4;
     _invokers.foreach{ curInvoker =>
-      curInvoker.myStats.updateInvokerResource(4,8*1024) // 4 cores, 8GB
-      logging.info(this,s"<avs_debug> in <updateInvokers> curInvoker: ${curInvoker.id.toInt} will set core to ${tempNumCores}, i.e. curInvoker.myResources.numCores: ${curInvoker.myStats.myResources.numCores}")
-      tempNumCores+=1
+      //curInvoker.myStats.updateInvokerResource(4,8*1024) // 4 cores, 8GB
+      addInvokerTracking(curInvoker,tempNumCores,8*1024)
+      logging.info(this,s"<avs_debug> in <updateInvokers> curInvoker: ${curInvoker.id.toInt}")
     }
+
     // avs --end
 
     if (oldSize != newSize) {

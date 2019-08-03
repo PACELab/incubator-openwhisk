@@ -94,7 +94,7 @@ class PerInvokerActionStats(val actionName: String){
   var standaloneRuntime = 0
   var opZone = 0 // 0: safe ( 0 to 50% of latency); 1: will reach un-safe soon, 2: unsafe
 
-  def simplePrint(toPrintAction:String, toPrintLatency: Long, toPrintNumConts:Int,logging: Logging): Unit ={
+  def simplePrint(toPrintAction:String, toPrintLatency: Long, toPrintNumConts:Int,logging: Logging): Unit = {
    logging.info(this,s"\t <avs_debug> <simplePrint> Action: ${toPrintAction} has averageLatency: ${toPrintLatency} and #conts: ${toPrintNumConts}") 
   }
 
@@ -153,7 +153,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState)
  * @param status it status (healthy, unhealthy, offline)
  */
 class InvokerHealth(val id: InvokerInstanceId, val status: InvokerState) {
-  var myStats: AdapativeInvokerStats = new AdapativeInvokerStats(id,status) // avs
+  //var myStats: AdapativeInvokerStats = new AdapativeInvokerStats(id,status) // avs
   override def equals(obj: scala.Any): Boolean = obj match {
     case that: InvokerHealth => that.id == this.id && that.status == this.status
     case _                   => false
