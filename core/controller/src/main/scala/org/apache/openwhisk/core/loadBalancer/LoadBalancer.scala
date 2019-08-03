@@ -87,15 +87,41 @@ class functionInfo {
 // avs --end  
 }
 
-class PerInvokerActionStats(val actionName: String){
+// the stats of an action in a given invoker
+class ActionStatsPerInvoker(val actionName: String,logging: Logging){
   var numConts = 0
-  var movingAvgLatency = 0 
+  var movingAvgLatency: Long = 0 
   var actionType: String  = "MP" // ET or MessagingProvider
   var standaloneRuntime = 0
   var opZone = 0 // 0: safe ( 0 to 50% of latency); 1: will reach un-safe soon, 2: unsafe
+  var lastUpdated = 0 // TODO: should be time, will update TYPE later.
 
-  def simplePrint(toPrintAction:String, toPrintLatency: Long, toPrintNumConts:Int,logging: Logging): Unit = {
+  def simplePrint(toPrintAction:String, toPrintLatency: Long, toPrintNumConts:Int): Unit = {
    logging.info(this,s"\t <avs_debug> <simplePrint> Action: ${toPrintAction} has averageLatency: ${toPrintLatency} and #conts: ${toPrintNumConts}") 
+  }
+}
+
+// the stats of an action across all invokers. Tracked per Invoker.
+class ActionStats(val actionName:String,logging: Logging){
+  var usedInvokers = mutable.Map.empty[InvokerInstanceId, ActionStatsPerInvoker]
+
+  def addActionStats(invoker: InvokerInstanceId,movingAvgLatency: Long, toUpdateNumConts: Int){
+    usedInvokers.get(invoker) match{
+      case Some(curInvokerActStats) =>
+        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
+        curInvokerActStats.numConts = toUpdateNumConts
+        curInvokerActStats.movingAvgLatency = movingAvgLatency
+
+      case None =>
+        // allActions = allActions + (toAddAction -> new ActionStatsPerInvoker(toAddAction))
+        // allInvokers = allInvokers + (invoker.id -> new AdapativeInvokerStats(invoker.id,invoker.status) )
+        usedInvokers = usedInvokers + (invoker -> new ActionStatsPerInvoker(actionName,logging))
+        var tempInvokerActStats: ActionStatsPerInvoker = usedInvokers(invoker)
+        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
+        tempInvokerActStats.numConts = toUpdateNumConts
+        tempInvokerActStats.movingAvgLatency = movingAvgLatency
+
+    }
   }
 
 }
@@ -104,7 +130,7 @@ class InvokerResources(var numCores: Int, var memorySize: Int){
 
 }
 
-class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState) extends functionInfo{
+class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,logging: Logging) extends functionInfo{
   // begin - copied from InvokerHealth
   override def equals(obj: scala.Any): Boolean = obj match {
     case that: AdapativeInvokerStats => that.id == this.id && that.status == this.status
@@ -116,25 +142,41 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState)
   var myResources = new InvokerResources(0,0) 
   var numETConts = 0
   var numMPConts = 0
-  var allActions = mutable.Map.empty[String, PerInvokerActionStats]
+  var allActions = mutable.Map.empty[String, ActionStatsPerInvoker]
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
     myResources.numCores = toSetNumCores
     myResources.memorySize = toSetMemory
   }
 
-  def addAction(toAddAction: String,logging: Logging): Unit = {
+  def addAction(toAddAction: String): Unit = {
     logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Trying to add action: ${toAddAction} to allActions")
     allActions.get(toAddAction) match {
       case Some (curAction) =>
-        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Ok action ${toAddAction} IS present in allActions, doing nothing!")
+        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> invoker: ${id.toInt} Ok action ${toAddAction} IS present in allActions, doing nothing!")
       case None => 
-        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Ok action ${toAddAction} is NOT present in allActions, adding it..")
-        allActions = allActions + (toAddAction -> new PerInvokerActionStats(toAddAction))
+        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> invoker: ${id.toInt} Ok action ${toAddAction} is NOT present in allActions, adding it..")
+        allActions = allActions + (toAddAction -> new ActionStatsPerInvoker(toAddAction,logging))
     }
     var myActType = getActionType(toAddAction);
     var myStandaloneRuntime = getFunctionRuntime(toAddAction)
     logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Action: ${toAddAction} is of type: ${myActType} and runtime: ${myStandaloneRuntime}")
+  }
+
+  def updateActionStats(toUpdateAction:String, movingAvgLatency: Long, toUpdateNumConts:Int){
+    allActions.get(toUpdateAction) match {
+      case Some(curActStats) => 
+        curActStats.numConts = toUpdateNumConts
+        curActStats.movingAvgLatency = movingAvgLatency
+        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <updateActionStats> 1. invoker: ${id.toInt} action: ${toUpdateAction} numConts: ${curActStats.numConts} movingAvgLatency: ${curActStats.movingAvgLatency}")     
+
+      case None =>
+        allActions = allActions + (toUpdateAction -> new ActionStatsPerInvoker(toUpdateAction,logging))
+        var tempActStats: ActionStatsPerInvoker = allActions(toUpdateAction)
+        tempActStats.numConts = toUpdateNumConts
+        tempActStats.movingAvgLatency = movingAvgLatency
+        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <updateActionStats> 2. invoker: ${id.toInt} action: ${toUpdateAction} numConts: ${tempActStats.numConts} movingAvgLatency: ${tempActStats.movingAvgLatency}")     
+    }
   }
 
   def capacityRemaining(): Boolean = {
