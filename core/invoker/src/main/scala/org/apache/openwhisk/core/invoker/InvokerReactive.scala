@@ -221,17 +221,26 @@ class InvokerReactive(
 */
   }
 
-
 // avs --begin
   private val relayActionStats: InvokerReactive.ActiveLoadResp = (curActStats: toRelayActionStats,controllerID: Int) => {
-    logging.info(this, s"<avs_debug> <processLoadMessage> actName: ${curActStats.actionName}, avgLat: ${curActStats.avgLatency} numConts: ${curActStats.numConts}")
+    var printMsg = s"<avs_debug> <processLoadMessage> actName: ${curActStats.actionName}, avgLat: ${curActStats.avgLatency} numConts: ${curActStats.numConts}"
+    logging.info(this, printMsg)
     val msg: ActionStatsMessage = ActionStatsMessage(curActStats.actionName,curActStats.avgLatency,curActStats.numConts)
     producer.send(topic = "load-completed" + controllerID, msg).andThen {
         case Success(_) =>
-          logging.info(
-            this,
-            s"posted resp to loadRequest for aciton: ${curActStats.actionName} ")
-    }    
+          logging.info(this,s" <avs_debug> <Success-1> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg.toString} ")
+        case Failure(_) =>
+          logging.info(this,s" <avs_debug> <Failure-1> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg.toString} ")
+    }     
+
+    /*val msg2: LoadMessage = LoadMessage(printMsg)
+    producer.send(topic = "load-completed" + controllerID, msg2).andThen {
+        case Success(_) =>
+          logging.info(this,s" <avs_debug> <Success-2> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg2.toString} ")
+        case Failure(_) =>
+          logging.info(this,s" <avs_debug> <Failure-2> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg2.toString} ")
+    } */    
+
   }
 // avs --end 
   /** Stores an activation in the database. */

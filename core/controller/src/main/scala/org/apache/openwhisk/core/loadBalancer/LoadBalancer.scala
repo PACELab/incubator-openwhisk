@@ -26,6 +26,124 @@ import org.apache.openwhisk.core.connector._
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.spi.Spi
 import scala.concurrent.duration._
+import scala.collection.mutable //avs
+import scala.collection.immutable //avs
+//import scala.collection.mutable.ListBuffer //avs
+
+// avs --begin
+
+class functionInfo {
+  // avs --begin
+  var containerStandaloneRuntime = immutable.Map.empty[String,Double] 
+  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->635.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->6350.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->18000.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1800.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->550.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0.0)
+  
+  def addFunctionRuntime(functionName: String): Unit = {
+    if(functionName == "imageResizing_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 635.0)  
+    }else if (functionName == "rodinia_nn_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 6350.0)  
+    }else if (functionName == "euler3d_cpu_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000.0)  
+    }else if (functionName == "servingCNN_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1800.0)  
+    }else if (functionName =="realTimeAnalytics_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 550.0)  
+    }
+    else if (functionName == "invokerHealthTestAction0"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
+    }
+  }   
+
+  def getFunctionRuntime(functionName: String): Double = {
+    containerStandaloneRuntime.get(functionName) match {
+      case Some(funcStandaloneRuntime) => 
+      funcStandaloneRuntime
+    case None =>
+      var maxRuntime:Double = 60*5*1000.0
+      maxRuntime
+    }
+  }
+
+  def getActionType(functionName: String): String = {
+    if(functionName == "imageResizing_v1"){
+        "ET" 
+    }else if (functionName == "rodinia_nn_v1"){
+        "MP" 
+    }else if (functionName == "euler3d_cpu_v1"){
+        "MP"
+    }else if (functionName == "servingCNN_v1"){
+        "ET" 
+    }else if (functionName == "realTimeAnalytics_v1"){
+        "ET"       
+    }else{
+        "MP"
+    }
+  }
+// avs --end  
+}
+
+class PerInvokerActionStats(val actionName: String){
+  var numConts = 0
+  var movingAvgLatency = 0 
+  var actionType: String  = "MP" // ET or MessagingProvider
+  var standaloneRuntime = 0
+  var opZone = 0 // 0: safe ( 0 to 50% of latency); 1: will reach un-safe soon, 2: unsafe
+
+  def simplePrint(toPrintAction:String, toPrintLatency: Long, toPrintNumConts:Int,logging: Logging): Unit ={
+   logging.info(this,s"\t <avs_debug> <simplePrint> Action: ${toPrintAction} has averageLatency: ${toPrintLatency} and #conts: ${toPrintNumConts}") 
+  }
+
+}
+
+class InvokerResources(var numCores: Int, var memorySize: Int){
+
+}
+
+class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState) extends functionInfo{
+  // begin - copied from InvokerHealth
+  override def equals(obj: scala.Any): Boolean = obj match {
+    case that: AdapativeInvokerStats => that.id == this.id && that.status == this.status
+    case _                   => false
+  }
+
+  override def toString = s"AdapativeInvokerStats($id, $status)"
+  // end - copied from InvokerHealth
+  var myResources = new InvokerResources(0,0) 
+  var numETConts = 0
+  var numMPConts = 0
+  var allActions = mutable.Map.empty[String, PerInvokerActionStats]
+
+  def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
+    myResources.numCores = toSetNumCores
+    myResources.memorySize = toSetMemory
+  }
+
+  def addAction(toAddAction: String,logging: Logging): Unit = {
+    logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Trying to add action: ${toAddAction} to allActions")
+    allActions.get(toAddAction) match {
+      case Some (curAction) =>
+        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Ok action ${toAddAction} IS present in allActions, doing nothing!")
+      case None => 
+        logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Ok action ${toAddAction} is NOT present in allActions, adding it..")
+        allActions = allActions + (toAddAction -> new PerInvokerActionStats(toAddAction))
+    }
+    var myActType = getActionType(toAddAction);
+    var myStandaloneRuntime = getFunctionRuntime(toAddAction)
+    logging.info(this,s"\t <avs_debug> <AdapativeInvokerStats> <addAction> Action: ${toAddAction} is of type: ${myActType} and runtime: ${myStandaloneRuntime}")
+  }
+
+  def capacityRemaining(): Boolean = {
+    // should update based on -- memory; #et, #mp
+    true
+  }
+
+}
+// avs --end
 
 /**
  * Describes an abstract invoker. An invoker is a local container pool manager that
@@ -35,6 +153,7 @@ import scala.concurrent.duration._
  * @param status it status (healthy, unhealthy, offline)
  */
 class InvokerHealth(val id: InvokerInstanceId, val status: InvokerState) {
+  var myStats: AdapativeInvokerStats = new AdapativeInvokerStats(id,status) // avs
   override def equals(obj: scala.Any): Boolean = obj match {
     case that: InvokerHealth => that.id == this.id && that.status == this.status
     case _                   => false

@@ -941,25 +941,6 @@ object ContainerPool {
 
   def getCurActionStats(curActName: String, logging: AkkaLogging): toRelayActionStats = {
     var pool: Map[String,funcConfigTracking] = cpuSharesPool;
-    
-    /* var allLatencyData = new mutable.ListBuffer[toRelayActionStats]
-    pool.keys.foreach{ curActName =>
-      var myConfig: funcConfigTracking = pool(curActName)
-      var tempAvgLatency = myConfig.getCurAvgLatency()
-      var tempNumConts = myConfig.numContainerTracked()
-      logging.info(this, s"<avs_debug><getCurActionStats> <initData> action: ${curActName} tempAvgLatency: ${tempAvgLatency} tempNumConts: ${tempNumConts}  ")      
-      //var tempActStats: toRelayActionStats = new toRelayActionStats(curActName, myConfig.getCurAvgLatency(), myConfig.numContainerTracked())
-      var tempActStats: toRelayActionStats = new toRelayActionStats(curActName, tempAvgLatency, tempNumConts)
-      allLatencyData+= tempActStats
-
-    }
-
-    logging.info(this, s"<avs_debug><getCurActionStats> BEGIN *************** ")      
-    //class toRelayActionStats(val actionName: Int,val avgLatency: Int,val numConts: Int)
-    allLatencyData.foreach{ curLatData =>
-      logging.info(this, s"<avs_debug><getCurActionStats> <allLatencyData> action: ${curLatData.actionName} numConts: ${curLatData.numConts} avgLatency: ${curLatData.avgLatency} ")      
-    }
-    logging.info(this, s"<avs_debug><getCurActionStats> End: ${tempCpuShares} *************** ")      */
 
     cpuSharesPool.get(curActName) match {
       case Some(myConfig) =>

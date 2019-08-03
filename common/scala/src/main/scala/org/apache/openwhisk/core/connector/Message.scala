@@ -88,18 +88,33 @@ object LoadMessage extends DefaultJsonProtocol {
   implicit val serdes = jsonFormat(LoadMessage.apply _, "myStr")
 }
 
-case class ActionStatsMessage(val curActName: String,val avgLatency: Long,val numConts: Int) extends Message{
-  override def serialize = ActionStatsMessage.serdes.write(this).compactPrint
+/*
+case class Metric(metricName: String, metricValue: Long) extends EventMessageBody {
+  val typeName = "Metric"
+  override def serialize = toJson.compactPrint
+  def toJson = Metric.metricFormat.write(this).asJsObject
+}
 
+object Metric extends DefaultJsonProtocol {
+  def parse(msg: String) = Try(metricFormat.read(msg.parseJson))
+  implicit val metricFormat = jsonFormat(Metric.apply _, "metricName", "metricValue")
+}  
+*/  
+
+case class ActionStatsMessage(val curActName: String,
+                              val avgLatency: Long,
+                              val numConts: Int) extends Message{
   override def toString = {
-    //val value = (content getOrElse JsObject.empty).compactPrint
     s"action: ${curActName} numConts: ${numConts} avgLatency: ${avgLatency}"
   }  
+  def toJson = ActionStatsMessage.serdes.write(this).asJsObject
+  override def serialize = toJson.compactPrint
 }
 
 object ActionStatsMessage extends DefaultJsonProtocol {
   def parse(msg: String): Try[ActionStatsMessage] = Try(serdes.read(msg.parseJson))
-  implicit val serdes = jsonFormat3(ActionStatsMessage.apply)
+  //implicit val serdes = jsonFormat3(ActionStatsMessage.apply)
+  implicit val serdes = jsonFormat(ActionStatsMessage.apply _, "curActName","avgLatency","numConts")
 }
 
 // avs --end

@@ -241,7 +241,7 @@ object Controller {
 
     Seq(
       ("completed" + instance.asString, "completed", Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)),
-      ("load-completed" + instance.asString, "completed", Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)), //avs
+      ("load-completed" + instance.asString, "load-completed", Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)), //avs
       ("health", "health", None),
       ("cacheInvalidation", "cache-invalidation", None),
       ("events", "events", None)).foreach {

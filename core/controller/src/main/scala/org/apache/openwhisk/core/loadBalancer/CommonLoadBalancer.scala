@@ -37,6 +37,8 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
+import scala.collection.mutable //avs
+//import scala.collection.immutable //avs
 
 /**
  * Abstract class which provides common logic for all LoadBalancer implementations.
@@ -62,6 +64,8 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     loadConfigOrThrow[RoundRobinContainerPoolBalancerConfig](ConfigKeys.loadbalancer)
 
   protected val invokerPool: ActorRef
+
+  protected[loadBalancer] var curRunningActions = mutable.Map.empty[String, PerInvokerActionStats]
 
   /** State related to invocations and throttling */
   protected[loadBalancer] val activationSlots = TrieMap[ActivationId, ActivationEntry]()
@@ -224,10 +228,42 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   private val loadRespFeed: ActorRef =
     loadFeedFactory.createFeed(actorSystem, messagingProvider, processLoadResponse)
 
-  def processLoadResponse(bytes: Array[Byte]): Future[Unit] = Future{
+  protected[loadBalancer] def processLoadResponse(bytes: Array[Byte]): Future[Unit] = Future{
+    logging.info(this, s"<avs_debug> <processLoadResponse> 1")
     val raw = new String(bytes, StandardCharsets.UTF_8)
     //Future(LoadMessage.parse(val)))
-    logging.error(this, s"<avs_debug> <processLoadResponse> raw_message: ${raw}")
+    //val msg: ActionStatsMessage = ActionStatsMessage(curActStats.actionName,curActStats.avgLatency,curActStats.numConts)
+    //val msg: ActionStatsMessage = ActionStatsMessage.parse(raw)
+    /*val curActName: String,
+                              val avgLatency: Long,
+                              val numConts: Int
+    */
+    /*LoadMessage.parse(raw) match {
+      case Success(m: LoadMessage) =>
+        logging.info(this,s"<avs_debug> <processLoadResponse> LoadMessage successfully parsed! m.Str: ${m.toString}")
+      case Failure(t) =>
+        logging.info(this,s"<avs_debug> <processLoadResponse> LoadMessage wasn't parsed! raw: ${raw}")
+    }*/
+
+    ActionStatsMessage.parse(raw) match {
+      case Success(m: ActionStatsMessage) =>
+        logging.info(this,s"<avs_debug> <processLoadResponse> ActionStatsMessage successfully parsed! m.Str: ${m.toString}")
+        curRunningActions.get(m.curActName) match {
+          case Some(curActStats) => 
+            logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is PRESENT in curRunningActions")
+            curActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
+          case None => 
+            logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is ABSENT in curRunningActions")
+            curRunningActions = curRunningActions + (m.curActName -> new PerInvokerActionStats(m.curActName))
+
+            var myActStats :PerInvokerActionStats = curRunningActions(m.curActName)
+            myActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
+        }
+        //simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
+      case Failure(t) =>
+        logging.info(this,s"<avs_debug> <processLoadResponse> ActionStatsMessage wasn't parsed! raw: ${raw}")
+    }    
+    //logging.info(this, s"<avs_debug> <processLoadResponse> raw_message: ${raw} actStatsMsg --> {msg.toString} loadMsg --> {msg2.toString}")
     loadRespFeed ! MessageFeed.Processed
   }  
 // avs --end

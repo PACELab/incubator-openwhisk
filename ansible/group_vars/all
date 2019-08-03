@@ -68,7 +68,7 @@ limits:
 # Moved here to avoid recursions. Please do not use outside of controller-dict.
 __controller_ssl_keyPrefix: "controller-"
 __controller_blackbox_fraction: 1.0 #0.10
-__avs_loadbalancer: "org.apache.openwhisk.core.loadBalancer.RoundRobinContainerPoolBalancer"
+__avs_loadbalancer: "org.apache.openwhisk.core.loadBalancer.AdaptiveContainerPoolBalancer"
 
 # port means outer port
 controller:
