@@ -158,10 +158,14 @@ class TrackFunctionStats(
 
 
   def printAllContainers(): Unit = {
+    var curBatch_minCpuShares = maxCpuShares
     myContainers.keys.foreach{ curCont =>
       var curContData: contStatsData = myContainers(curCont)
       logging.info(this,s"<avs_debug><TrackFunctionStats><printAllContainers> ${actionName} ${curContData.trackContId} ${curContData.cpuShares}")
+      if(curBatch_minCpuShares > curContData.cpuShares)
+        curBatch_minCpuShares = curContData.cpuShares
     } 
+    curCpuShares = curBatch_minCpuShares
   }
 
   def accumAllCpuShares(): Int = {
@@ -178,15 +182,6 @@ class TrackFunctionStats(
   def dummyCall(): Unit = {
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <dummyCall> for action: ${actionName} ")
   }
-
-  /*def getCurCpuShares(): Int = {
-    curCpuShares
-  }
-
-  def setCurCpuShares(toSetCpuShares: Int): Unit = {
-    curCpuShares = toSetCpuShares
-    logging.info(this, s"<avs_debug> <TrackFunctionStats> <setCurCpuShares> for action: ${actionName} changed curShares: ${curCpuShares} toSetCpuShares: ${toSetCpuShares} ")                
-  }*/
 
   def getDefaultCpuShares(): Int = {
     defaultCpuShares
@@ -250,28 +245,36 @@ class TrackFunctionStats(
             curCpuShares = maxCpuShares
 
           updateCount_Flag = false
-          myContainers.keys.foreach{ cont => 
-            var tempCpuShares = getCurContCpuShares(cont)
-            var toSetCpuShares = tempCpuShares + toIncrememnetShares
+          var curBatch_minCpuShares = maxCpuShares
+          if(toIncrememnetShares>0){
+            myContainers.keys.foreach{ cont => 
+              var tempCpuShares = getCurContCpuShares(cont)
+              var toSetCpuShares = tempCpuShares + toIncrememnetShares
 
-            if(toSetCpuShares < defaultCpuShares)
-              toSetCpuShares = defaultCpuShares
-            else if(toSetCpuShares > maxCpuShares)
-              toSetCpuShares = maxCpuShares
+              if(toSetCpuShares < defaultCpuShares)
+                toSetCpuShares = defaultCpuShares
+              else if(toSetCpuShares > maxCpuShares)
+                toSetCpuShares = maxCpuShares
 
-            cont.updateCpuShares(curId,toSetCpuShares)      
-            setCurContCpuShares(cont,toSetCpuShares)
-            // overkill to do it every time, but ensures that will only be updated on actually updating cpuShares
-            updateCount_Flag = true;
+              cont.updateCpuShares(curId,toSetCpuShares)      
+              setCurContCpuShares(cont,toSetCpuShares)
+              // overkill to do it every time, but ensures that will only be updated on actually updating cpuShares
+              updateCount_Flag = true;
+              if(curBatch_minCpuShares > toSetCpuShares)
+                curBatch_minCpuShares = toSetCpuShares
+            }
+          }
+
+          if(updateCount_Flag){
+            curCpuShares = curBatch_minCpuShares // this way, I will give atleast the minCpuShare of existing batch to the new container, if one is spawned. also, would ensure I won't get stuck at maxCpuShares if it hit there once!
+
             curCpuSharesUsed = 0;
             if(shouldEaseup){ 
               curCpuSharesUpdate_Threshold = default_cpuSharesUpdate_Threshold * 3; // backing off, since the system is likely running at it's peak.
             }else{
               curCpuSharesUpdate_Threshold = default_cpuSharesUpdate_Threshold;
             }
-          }
 
-          if(updateCount_Flag){
             allCpuShares+= curCpuShares
             myAction.limits.iVals.myInferredConfig.mostusedCpuShares = trackSharesUsed.keysIterator.max //trackSharesUsed.maxBy { case (key, value) => value }
             myAction.limits.iVals.myInferredConfig.numTimesUpdated = myAction.limits.iVals.myInferredConfig.numTimesUpdated+1
@@ -759,13 +762,13 @@ object ContainerPool {
     }else{
 
       var befUpdatingAccumShares = 0
-      var afterUpdatingAccumShares = 0
       var avgCpuSharesReduction = 0
       var diffCpuShares = 0
       var poolSize = pool.size
       var numIters = 0
       var numOtherContainers = 0 
       var decAll: Boolean = false
+      var sumOfAllCpuShares = 0
 
       pool.keys.foreach{ curActName =>
         var myTrackedStats: TrackFunctionStats = pool(curActName)
@@ -788,14 +791,21 @@ object ContainerPool {
         if(avgCpuSharesReduction>=0)
           rebalanceCpuShares(avgCpuSharesReduction,toIncActionName,decAll,logging)
 
-        canUpdate = ( cpuSharesConsumptionOf(pool) + (numContsToUpdate  * resUpdatedShares) ) <= totalCpuShares 
-
+        sumOfAllCpuShares = cpuSharesConsumptionOf(pool)
+        canUpdate = ( sumOfAllCpuShares + (numContsToUpdate  * resUpdatedShares) ) <= totalCpuShares 
         if(!canUpdate){
+
           canUpdate = true
-          diffCpuShares = ( (numContsToUpdate  * resUpdatedShares) + cpuSharesConsumptionOf(pool) ) - totalCpuShares;
+          diffCpuShares = ( (numContsToUpdate  * resUpdatedShares) + sumOfAllCpuShares  ) - totalCpuShares;
 
           if(numContsToUpdate!=0) avgCpuSharesReduction = diffCpuShares/numContsToUpdate
           resUpdatedShares = resUpdatedShares - avgCpuSharesReduction
+
+          if(resUpdatedShares<0){
+            printAllCpuShares(logging)
+            sumOfAllCpuShares = cpuSharesConsumptionOf(pool) 
+            resUpdatedShares = 0
+          }
           //logging.info(this, s"<avs_debug><cpuSharesCheck> 3. canUpdate: ${canUpdate} avgCpuSharesReduction: ${avgCpuSharesReduction} befUpdatingAccumShares: ${befUpdatingAccumShares} afterUpdatingAccumShares: ${afterUpdatingAccumShares} diffCpuShares: ${diffCpuShares}") 
         }
         numIters+=1
@@ -829,6 +839,7 @@ object ContainerPool {
     logging.info(this, s"<avs_debug><printAllCpuShares> End: ${sumOfAllCpuShares} *************** ")  
     // so, sumOfAllCpuShares is greater than totalCpuShares. Should reduce it..
     if( (sumOfAllCpuShares> totalCpuShares) && (totNumConts>0)){
+      //equitableRebalance(sumOfAllCpuShares,totNumConts)
       var diffCpuShares = (sumOfAllCpuShares - totalCpuShares); // / ()
       var avgCpuSharesReduction: Int = diffCpuShares/totNumConts; var percentReduct: Double = 0
       if(avgCpuSharesReduction >= 4){
@@ -891,11 +902,6 @@ object ContainerPool {
             logging.info(this, s"<avs_debug><rebalanceCpuShares> NOTT going to update my cpushares. actName: ${myTrackedStats.actionName} my id: ${myTrackedStats.getCurContID(curCont)} and my cpuShares is ${myTrackedStats.getCurContCpuShares(curCont)} and updatedCpuShares: ${updatedCpuShares} and reductThreshold: ${reductThreshold}")                    
           }
         }
-
-        /*if( (updatedCpuShares>=myTrackedStats.getDefaultCpuShares()) && (updatedCpuShares >= reductThreshold*myCurShares)){
-          logging.info(this, s"<avs_debug><rebalanceCpuShares> ActName: ${myTrackedStats.actionName} updatedCpuShares: ${updatedCpuShares} will updated myFuncStats")                    
-          myTrackedStats.myFuncStats.setCurContCpuSharesupdatedCpuShares) 
-        }*/
       }
     }
 
