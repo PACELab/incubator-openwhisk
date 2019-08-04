@@ -73,7 +73,7 @@ class TrackFunctionStats(
   private var myActionType = getActionType(actionName)
   private val latencyThreshold : Double  = 1.10;
   private val violationThreshold: Int = 1;
-  private val default_cpuSharesUpdate_Threshold: Int = if(myActionType=="ET") 5 else 1
+  private val default_cpuSharesUpdate_Threshold: Int = if(myActionType=="ET") 5 else 3
   private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold;
   private var shouldEaseup: Boolean = false;
 
