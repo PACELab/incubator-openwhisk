@@ -180,6 +180,8 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
   var allActions = mutable.Map.empty[String, ActionStatsPerInvoker]
   var allActionsByType = mutable.Map.empty[String, ListBuffer[String]]
+  allActionsByType = allActionsByType + ("ET" -> new mutable.ListBuffer[String])
+  allActionsByType = allActionsByType + ("MP" -> new mutable.ListBuffer[String])
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
     myResources.numCores = toSetNumCores

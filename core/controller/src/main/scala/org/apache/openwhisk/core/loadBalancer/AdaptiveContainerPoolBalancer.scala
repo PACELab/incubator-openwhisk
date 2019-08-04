@@ -270,7 +270,7 @@ class AdaptiveContainerPoolBalancer(
       /*val homeInvoker = hash % invokersToUse.size
       val stepSize = stepSizes(hash % stepSizes.size) */
       // to make it round-robin, will update the invoker used for previous invocation, and loopback later.
-      val homeInvoker = (prevInvokerUsed+1)%invokersToUse.size
+      val homeInvoker = (prevInvokerUsed)%invokersToUse.size
       val stepSize = 1
       // avs --end
       logging.info(this,s"<avs_debug> <AdaptiveContainerPoolBalancer> <publish> Calling schedule for activation ${msg.activationId} for '${msg.action.asString}' ($actionType) ") // avs
