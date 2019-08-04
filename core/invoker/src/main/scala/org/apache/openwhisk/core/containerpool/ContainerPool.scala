@@ -131,10 +131,10 @@ class TrackFunctionStats(
         trackContId // not updating the trackContId
       case None =>         
         //myContainers = myContainers + (container -> new contStatsData(defaultCpuShares,trackContId) )
-        myContainers = myContainers + (container -> new contStatsData(defaultCpuShares,trackContId) )
+        container.updateCpuShares(curId,curCpuShares) // so that it starts using the apt CPU shares.
+        myContainers = myContainers + (container -> new contStatsData(curCpuShares,trackContId) )
         //trackContId = trackContId+1 // updating the trackContId
         logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer-2> for action: ${actionName} adding a container curCpuShares: ${curCpuShares} trackContId: ${trackContId+1} defaultCpuShares: ${defaultCpuShares}")
-        container.updateCpuShares(curId,curCpuShares) // so that it starts using the apt CPU shares.
         trackContId+1
     }
   }
