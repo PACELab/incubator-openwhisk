@@ -282,7 +282,7 @@ class AdaptiveContainerPoolBalancer(
         action.limits.memory.megabytes,
         homeInvoker,
         stepSize,
-        msg.action.asString,
+        action.name.asString,
         cIC)
       invoker.foreach {
         case (_, true) =>
@@ -411,7 +411,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
     index: Int,
     step: Int,
     actionName: String,
-    checkInvokerCapacity: (InvokerHealth) => Boolean, //avs
+    checkInvokerCapacity: (InvokerHealth,String) => Boolean, //avs
     stepsDone: Int = 0
   )(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
     val numInvokers = invokers.size
@@ -423,7 +423,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
       //test this invoker - if this action supports concurrency, use the scheduleConcurrent function
       if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquireConcurrent(fqn, maxConcurrent, slots)) {
         logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
-        if(checkInvokerCapacity(invoker)){
+        if(checkInvokerCapacity(invoker,actionName)){
           logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
         }
         Some(invoker.id, false)  

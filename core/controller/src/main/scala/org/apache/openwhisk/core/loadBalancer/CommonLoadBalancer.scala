@@ -70,7 +70,6 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   protected[loadBalancer] var curRunningActions = mutable.Map.empty[String, ActionStats] // avs
   
   var allInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]//avs
-  //invoker.myStats.addAction(actionName,logging)  
 
   /** State related to invocations and throttling */
   protected[loadBalancer] val activationSlots = TrieMap[ActivationId, ActivationEntry]()
@@ -245,6 +244,23 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
         tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
       } 
   }  
+   
+  type cicType = (InvokerHealth,String) => Boolean 
+  val cIC: cicType = (invoker: InvokerHealth,actionName:String) => {
+    //def checkInvokerCapacity(invoker: InvokerInstanceId): Boolean = {
+    logging.info(this,s"<avs_debug> <checkInvokerCapacity> on invoker: ${invoker.id.toInt}")
+    allInvokers.get(invoker.id) match {
+      case Some(curInvokerStats) =>
+        logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is PRESENT in allInvokers ")
+        curInvokerStats.capacityRemaining(actionName)
+      case None =>
+        allInvokers = allInvokers + (invoker.id -> new AdapativeInvokerStats(invoker.id,invoker.status,logging) )
+        logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is ABSENT in allInvokers ")
+        var tempInvokerStats = allInvokers(invoker.id)
+        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+        tempInvokerStats.capacityRemaining(actionName)
+      } 
+  }
 
   def addActionStatsToInvoker(invoker: InvokerInstanceId,toUpdateAction:String,movingAvgLatency: Long, toUpdateNumConts:Int): Unit = {
     logging.info(this,s"<avs_debug> <addActionStatsToInvoker> on invoker: ${invoker.toInt}")
@@ -259,24 +275,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
         tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
         tempInvokerStats.updateActionStats(toUpdateAction,movingAvgLatency,toUpdateNumConts)
       } 
-  }    
-
-  type cicType = (InvokerHealth) => Boolean 
-  val cIC: cicType = (invoker: InvokerHealth) => {
-    //def checkInvokerCapacity(invoker: InvokerInstanceId): Boolean = {
-    logging.info(this,s"<avs_debug> <checkInvokerCapacity> on invoker: ${invoker.id.toInt}")
-    allInvokers.get(invoker.id) match {
-      case Some(curInvokerStats) =>
-        logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is PRESENT in allInvokers ")
-        curInvokerStats.capacityRemaining()
-      case None =>
-        allInvokers = allInvokers + (invoker.id -> new AdapativeInvokerStats(invoker.id,invoker.status,logging) )
-        logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is ABSENT in allInvokers ")
-        var tempInvokerStats = allInvokers(invoker.id)
-        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
-        tempInvokerStats.capacityRemaining()
-      } 
-  }
+  } 
 
   private val loadRespFeed: ActorRef =
     loadFeedFactory.createFeed(actorSystem, messagingProvider, processLoadResponse)
@@ -294,7 +293,6 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
             curActStats.addActionStats(m.invoker,m.avgLatency,m.numConts) // curActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
           case None => 
             logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is ABSENT in curRunningActions  and it ran on invoker: ${m.invoker.toInt}")
-            //curRunningActions = curRunningActions + (m.curActName -> new ActionStatsPerInvoker(m.curActName,logging))
             curRunningActions = curRunningActions + (m.curActName -> new ActionStats(m.curActName,logging))
 
             var myActStats :ActionStats = curRunningActions(m.curActName)
