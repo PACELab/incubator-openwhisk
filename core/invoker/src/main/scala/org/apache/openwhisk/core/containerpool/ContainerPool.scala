@@ -158,14 +158,15 @@ class TrackFunctionStats(
 
 
   def printAllContainers(): Unit = {
-    var curBatch_minCpuShares = maxCpuShares
+    var curBatch_minCpuShares = maxCpuShares; var numConts = 0
     myContainers.keys.foreach{ curCont =>
       var curContData: contStatsData = myContainers(curCont)
       logging.info(this,s"<avs_debug><TrackFunctionStats><printAllContainers> ${actionName} ${curContData.trackContId} ${curContData.cpuShares}")
       if(curBatch_minCpuShares > curContData.cpuShares)
         curBatch_minCpuShares = curContData.cpuShares
+      numConts+=1
     } 
-    curCpuShares = curBatch_minCpuShares
+    curCpuShares = if(numConts!=0) curBatch_minCpuShares else defaultCpuShares
   }
 
   def accumAllCpuShares(): Int = {
