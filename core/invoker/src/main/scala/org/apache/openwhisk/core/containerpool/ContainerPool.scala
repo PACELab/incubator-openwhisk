@@ -130,12 +130,11 @@ class TrackFunctionStats(
         //setCurContCpuShares(container,curCpuShares)
         trackContId // not updating the trackContId
       case None =>         
-        //myContainers = myContainers + (container -> new contStatsData(defaultCpuShares,trackContId) )
-        container.updateCpuShares(curId,curCpuShares) // so that it starts using the apt CPU shares.
-        myContainers = myContainers + (container -> new contStatsData(curCpuShares,trackContId) )
-        //trackContId = trackContId+1 // updating the trackContId
+        myContainers = myContainers + (container -> new contStatsData(defaultCpuShares,trackContId) )
+         // so that it starts using the apt CPU shares.
+         //container.updateCpuShares(curId,curCpuShares); myContainers = myContainers + (container -> new contStatsData(curCpuShares,trackContId) )
         logging.info(this, s"<avs_debug> <TrackFunctionStats> <addContainer-2> for action: ${actionName} adding a container curCpuShares: ${curCpuShares} trackContId: ${trackContId+1} defaultCpuShares: ${defaultCpuShares}")
-        trackContId+1
+        trackContId+1 // updating the trackContId
     }
   }
 
@@ -719,8 +718,8 @@ object ContainerPool {
 
   //protected[containerpool]  var cpuSharesPool = immutable.Map.empty[ActorRef, funcConfigTracking] //avs
   protected[containerpool]  var cpuSharesPool = immutable.Map.empty[String, TrackFunctionStats] //avs
-  protected[containerpool] var totalCpuShares = 4*1024//1024; // WARNING: Should move this to poolConfig and to make it inferrable.
-  protected[containerpool] var reductThreshold: Double = 0.8 // 0.0
+  protected[containerpool] var totalCpuShares = 4*1024 //1024; // WARNING: Should move this to poolConfig and to make it inferrable.
+  protected[containerpool] var reductThreshold: Double = 0.0 // 0.0
   /**
    * Calculate the memory of a given pool.
    *
