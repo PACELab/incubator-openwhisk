@@ -990,7 +990,7 @@ object ContainerPool {
       // - there is more memory required
       // - there are still containers that can be removed
       // - there are enough free containers that can be removed
-      val (ref, data) = freeContainers.minBy(_._2.lastUsed)
+      val (ref, data) = freeContainers.maxBy(_._2.lastUsed)
       // Catch exception if remaining memory will be negative
       val remainingMemory = Try(memory - data.memoryLimit).getOrElse(0.B)
       remove(freeContainers - ref, remainingMemory,toRemove ++ List(ref))
