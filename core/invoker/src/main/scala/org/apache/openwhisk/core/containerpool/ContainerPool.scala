@@ -73,7 +73,7 @@ class TrackFunctionStats(
   private var myActionType = getActionType(actionName)
   private val latencyThreshold : Double  = 1.10;
   private val violationThreshold: Int = 1;
-  private val default_cpuSharesUpdate_Threshold: Int = if(myActionType=="ET") 5 else 1
+  private val default_cpuSharesUpdate_Threshold: Int = if(myActionType=="ET") 5 else 3
   private var curCpuSharesUpdate_Threshold : Int = default_cpuSharesUpdate_Threshold;
   private var shouldEaseup: Boolean = false;
 
@@ -300,7 +300,7 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} curRuntime: ${curRuntime} and numInvocations: ${numInvocations}")
-    //dummyCall()
+    dummyCall()
     checkCpuShares(curRuntime)
     if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)){
       printAllCpuShares(logging)
@@ -323,7 +323,7 @@ class TrackFunctionStats(
  * one job (either Start or Run) is sent to a child-actor at any given
  * time. The pool then waits for a response of that container, indicating
  * the container is done with the job. Only then will the pool send another
- * request to that container.
+ * request to that container
  *
  * Upon actor creation, the pool will start to prewarm containers according
  * to the provided prewarmConfig, iff set. Those containers will **not** be
