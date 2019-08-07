@@ -78,7 +78,7 @@ class TrackFunctionStats(
   private var shouldEaseup: Boolean = false;
 
   private val perIterIncrement = if(myActionType=="ET") 128 else 64
-  private val maxCpuShares = 768 //if(myActionType=="ET") 768 else 512
+  private val maxCpuShares = if(myActionType=="ET") 768 else 256
 
   private var numReqsProcessed = 0 // should be zero, but to debug have set it to 1.
   private var trackSharesUsed = mutable.Map.empty[Int,Int] // <num-shares>,<num-times-used>
@@ -244,7 +244,7 @@ class TrackFunctionStats(
           else if(curCpuShares>maxCpuShares) 
             curCpuShares = maxCpuShares
 
-          updateCount_Flag = false
+          updateCount_Flag = false; curCpuSharesUsed = 0
           var curBatch_minCpuShares = maxCpuShares
           if(toIncrememnetShares>0){
             myContainers.keys.foreach{ cont => 
@@ -289,6 +289,7 @@ class TrackFunctionStats(
           curCpuSharesUsed = 0;
         }
       }else{
+        updateCount_Flag = true; // if it is coming here, it should be updated..
         logging.info(this, s"<avs_debug> <TrackFunctionStats> <checkCpuShares> for action: ${actionName}. Even though the latency is greater than the threshold, latest updated cpushares is used: ${curCpuSharesUsed} across ${curNumConts} and it has been used on average ${avgNumtimeUsed}. Waiting for it to be used ${curCpuSharesUpdate_Threshold} on an average before next round of updates")          
       }
     }else{
