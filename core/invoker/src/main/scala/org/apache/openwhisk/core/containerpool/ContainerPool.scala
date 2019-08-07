@@ -78,7 +78,7 @@ class TrackFunctionStats(
   private var shouldEaseup: Boolean = false;
 
   private val perIterIncrement = if(myActionType=="ET") 128 else 64
-  private val maxCpuShares = 1024 //if(myActionType=="ET") 768 else 512
+  private val maxCpuShares = 768 //if(myActionType=="ET") 768 else 512
 
   private var numReqsProcessed = 0 // should be zero, but to debug have set it to 1.
   private var trackSharesUsed = mutable.Map.empty[Int,Int] // <num-shares>,<num-times-used>
