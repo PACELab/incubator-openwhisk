@@ -69,6 +69,7 @@ limits:
 __controller_ssl_keyPrefix: "controller-"
 __controller_blackbox_fraction: 1.0 #0.10
 __avs_loadbalancer: "org.apache.openwhisk.core.loadBalancer.AdaptiveContainerPoolBalancer"
+#__avs_loadbalancer: "org.apache.openwhisk.core.loadBalancer.RoundRobinContainerPoolBalancer"
 
 # port means outer port
 controller:

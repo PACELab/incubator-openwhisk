@@ -177,7 +177,7 @@ case class PreWarmCompleted(data: PreWarmedData)
 case class InitCompleted(data: WarmedData)
 case object RunCompleted
 
-case class UpdateStats(actionName: String,controllerID: ControllerInstanceId,runtime: Long) //avs
+case class UpdateStats(actionName: String,initTime: Long,controllerID: ControllerInstanceId,runtime: Long) //avs
 case class RemoveContTracking(container: Container, actionName: String) //avs
 case class getAllLatency(curActName: String,controllerID: Int)// avs should change controllerID to ControllerInstanceId type, will do it when getAllLatency will be turned into to a sensible request -- should pass controllerID from LB while sending a request
 
@@ -367,8 +367,8 @@ class ContainerProxy(
     case Event(RunCompleted, data: WarmedData) =>
       activeCount -= 1
       //context.parent ! UpdateStats(numActivationsServed) //avs 
-      if(prevActivationInitTime == 0) 
-        context.parent ! UpdateStats(data.action.name.asString,prevActivationControllerID,prevActivationTime) //avs 
+      //if(prevActivationInitTime == 0) 
+      context.parent ! UpdateStats(data.action.name.asString,prevActivationInitTime,prevActivationControllerID,prevActivationTime) //avs 
       prevActivationTime = 0;//avs
       prevActivationInitTime = 0// avs
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay

@@ -29,7 +29,7 @@ import scala.concurrent.duration._
 import scala.collection.mutable //avs
 import scala.collection.immutable //avs
 import scala.collection.mutable.ListBuffer //avs
-
+import java.time.Instant // avs
 // avs --begin
 
 class functionInfo {
@@ -96,6 +96,8 @@ class functionInfo {
   var opZoneSafe = 0
   var opZoneWarn = 1
   var opZoneUnSafe = 2
+
+  var statsTimeoutInMilli: Long = 60*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
 // avs --end  
 }
 
@@ -106,7 +108,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
   var movingAvgLatency: Long = 0 
   var actionType: String  = "MP" // ET or MessagingProvider
   var opZone = 0 // 0: safe ( 0 to 50% of latency); 1: will reach un-safe soon, 2: unsafe
-  var lastUpdated = 0 // TODO: should be time, will update TYPE later.
+  var lastUpdated: Long = Instant.now.toEpochMilli // TODO: should be time, will update TYPE later.
   
   def simplePrint(toPrintAction:String, toPrintLatency: Long, toPrintNumConts:Int): Unit = {
    logging.info(this,s"\t <avs_debug> <simplePrint> <ASPI> Action: ${toPrintAction} has averageLatency: ${toPrintLatency} and #conts: ${toPrintNumConts}") 
@@ -131,6 +133,14 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
       opZone = opZoneUnSafe
       logging.info(this,s"\t <avs_debug> <ASPI> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} latencyRatio: ${latencyRatio} toleranceRatio: ${toleranceRatio} is evidently in a weird region, so it should be declared UNSAFE --${opZone}") 
     }
+  }
+  def resetStats(curTime: Long): Unit = {
+    logging.info(this,s"\t <avs_debug> <ASPI> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats since: curTime: ${curTime} is larger than lastUpdated: ${lastUpdated} by ${statsTimeoutInMilli} ") 
+    opZone = 0 
+    movingAvgLatency = 0
+    numConts = 0
+    lastUpdated = Instant.now.toEpochMilli
+    // EXPT-WARNING: Might be better to issue a load request and refresh stats!, instead of resetting willy nilly!
   }
 }
 
@@ -183,11 +193,26 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   allActionsByType = allActionsByType + ("ET" -> new mutable.ListBuffer[String])
   allActionsByType = allActionsByType + ("MP" -> new mutable.ListBuffer[String])
 
+  var inFlightReqsByType = mutable.Map.empty[String, Int]
+  inFlightReqsByType = inFlightReqsByType + ("ET" -> 0)
+  inFlightReqsByType = inFlightReqsByType + ("MP" -> 0)
+
+  var statsUpdatedByAction = mutable.Map.empty[String,Long] // timestamp of last action..
+
+  // Instant.now.toEpochMilli
+
+  // -------------- Thresholds --------------
+  var maxInFlightReqs_ET = 1.5 * myResources.numCores
+  var maxInFlightReqs_MP = 1.0 * myResources.numCores
+  // -------------- Thresholds --------------
+
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
     myResources.numCores = toSetNumCores
     myResources.memorySize = toSetMemory
-  }
 
+    maxInFlightReqs_ET = 1.5 * myResources.numCores
+    maxInFlightReqs_MP = 1.0 * myResources.numCores
+  }
   def addAction(toAddAction: String):Unit = {
     logging.info(this,s"\t <avs_debug> <AIS> <addAction> Trying to add action: ${toAddAction} to allActions")
     allActions.get(toAddAction) match {
@@ -207,11 +232,16 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   }
 
   def updateActionStats(toUpdateAction:String, movingAvgLatency: Long, toUpdateNumConts:Int):Unit = {
+    var actType = getActionType(toUpdateAction)
+    var bef_pendingReqs = inFlightReqsByType(actType)
+    var after_pendingReqs = if(bef_pendingReqs > 0)  bef_pendingReqs-1 else 0
+    inFlightReqsByType(actType) = after_pendingReqs // ok will have an outstanding request of my type..
     allActions.get(toUpdateAction) match {
       case Some(curActStats) => 
         curActStats.numConts = toUpdateNumConts
         curActStats.movingAvgLatency = movingAvgLatency
-        logging.info(this,s"\t <avs_debug> <AIS> <updateActionStats> 1. invoker: ${id.toInt} action: ${toUpdateAction} numConts: ${curActStats.numConts} movingAvgLatency: ${curActStats.movingAvgLatency}")     
+        curActStats.lastUpdated = Instant.now.toEpochMilli
+        logging.info(this,s"\t <avs_debug> <AIS> <updateActionStats> 1. invoker: ${id.toInt} bef-pendingReqs: ${bef_pendingReqs} aft-: ${inFlightReqsByType(actType)} action: ${toUpdateAction} numConts: ${curActStats.numConts} movingAvgLatency: ${curActStats.movingAvgLatency} lastUpdated: ${curActStats.lastUpdated}")     
         curActStats.updateOpZone()
       case None =>
         //allActions = allActions + (toUpdateAction -> new ActionStatsPerInvoker(toUpdateAction,logging))
@@ -219,13 +249,18 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         var tempActStats: ActionStatsPerInvoker = allActions(toUpdateAction)
         tempActStats.numConts = toUpdateNumConts
         tempActStats.movingAvgLatency = movingAvgLatency
-        logging.info(this,s"\t <avs_debug> <AIS> <updateActionStats> 2. invoker: ${id.toInt} action: ${toUpdateAction} numConts: ${tempActStats.numConts} movingAvgLatency: ${tempActStats.movingAvgLatency}")     
+        tempActStats.lastUpdated = Instant.now.toEpochMilli
+        logging.info(this,s"\t <avs_debug> <AIS> <updateActionStats> 2. invoker: ${id.toInt} bef-pendingReqs: ${bef_pendingReqs} aft-: ${inFlightReqsByType(actType)} action: ${toUpdateAction} numConts: ${tempActStats.numConts} movingAvgLatency: ${tempActStats.movingAvgLatency} lastUpdated: ${tempActStats.lastUpdated}")     
     }
   }
 
   def findActionNumContsOpZone(toCheckAction: String): (Int,Int) = {
     allActions.get(toCheckAction) match {
       case Some(curActStats) => 
+        var curTime: Long = Instant.now.toEpochMilli
+        if( (curTime - curActStats.lastUpdated) > statsTimeoutInMilli)
+          curActStats.resetStats(curTime)
+
         logging.info(this,s"\t <avs_debug> <AIS> <findActionNumContsOpZone> 1. invoker: ${id.toInt} has action: ${toCheckAction}, it has numConts: ${curActStats.numConts} and it's opZone: ${curActStats.opZone}")     
         (curActStats.numConts,curActStats.opZone)
       case None =>
@@ -263,10 +298,11 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     //  2.b. If a container of this action doesn't exist, check whether we can add another container of this actionType (i.e. Check whether there are enough-cores available)
     //  Current Assumption: Ok to add a new-action, as long as all acitons are not in unsafe-region.
     
-    var actType = getActionType(actionName)
-    var myTypeConts = numConts(actType)    
+    var actType = getActionType(actionName)  
+    var retVal: Boolean = false
     var (myConts,status_opZone) = findActionNumContsOpZone(actionName)
     updateActTypeStats()
+    var myTypeConts = numConts(actType)  
 
     logging.info(this,s"\t <avs_debug> <AIS> <capRem> 0. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
 
@@ -274,59 +310,71 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
       logging.info(this,s"\t <avs_debug> <AIS> <capRem> 1. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} and myTypeConts: ${myTypeConts} ")
 
-      if((myTypeConts < myResources.numCores) && (status_opZone!= opZoneUnSafe)) {
-        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-        // ok, even if I need one more container, it can be fit in, I guess!
-        // Even if there is space, if I am in unsafe region, I will go somewhere else (EXPT-WARNING: this will likely make me use more machines!)
-        // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
-        true
-      }else if( (myTypeConts == myResources.numCores) && (myConts!=0) && (status_opZone == opZoneSafe)){
-        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} myConts: ${myConts} status_opZone: ${status_opZone}")
-        // ok, I have atleast one container, and all of them are in safe-zone (EXPT-WARNING: this is a bit suspect).
-        true
-      }else{
-        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-3> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} myConts: ${myConts} status_opZone: ${status_opZone}")
-        // No way JOSE!
-        false
-      } 
+      if( (inFlightReqsByType(actType) < maxInFlightReqs_MP) && (status_opZone!= opZoneUnSafe)) {
+        // Ok, I can accommodate atleast one request..
+        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+        if( (myTypeConts < myResources.numCores)){
+          // ok, even if I need one more container, it can be fit in, I guess!
+          // Even if there is space, if I am in unsafe region, I will go somewhere else (EXPT-WARNING: this will likely make me use more machines!)
+          // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-1.1> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+          retVal = true                     
+        }else if((myTypeConts == myResources.numCores) && (myConts!=0) && (status_opZone == opZoneSafe)){
+          // ok, I have atleast one container, and all of them are in safe-zone (EXPT-WARNING: this is a bit suspect).
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-1.2> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+        }else{
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-1.3> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} myConts: ${myConts} status_opZone: ${status_opZone}")
+          // No way JOSE!
+          retVal = false
+        }
+      }
     }
     else if(actType == "ET"){
       logging.info(this,s"\t <avs_debug> <AIS> <capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
-
-      if( (myTypeConts < myResources.numCores) && (status_opZone!= opZoneUnSafe ) ){
-        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-        // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.
-        // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
-        true
-      }else if( myTypeConts < (2*myResources.numCores) ){
-        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-        // we have maxed out, making sure everybody is safe atleast.
-        var myActTypeOpZone = actionTypeOpZone("ET")
-        if( myActTypeOpZone <= opZoneSafe){ // WARNING: by checking for maxOpZone to be safe, it already covers by own operating type.
-          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2.1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myActTypeOpZone: ${myActTypeOpZone} ")
-          // EXPT-WARNING: This could make me use a new machine, during init-zone of the experiments..
-          true
-        }else{ // Likely atleast one of them is in warning atleast
-          if( (myTypeConts==myResources.numCores) && (myConts!=0) && (status_opZone!= opZoneUnSafe )  ){
-            logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2.2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} myActTypeOpZone: ${myActTypeOpZone} ")
-            // I have atleast one container and it is atmost in warning zone, so will allow it..
-            true
-          }else{
-            logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2.2-Inv> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} myActTypeOpZone: ${myActTypeOpZone} ")
-            // this doesn't look good bro, so will just not accept this request!
-            false  
+      if ( ( inFlightReqsByType(actType) < maxInFlightReqs_ET) && (status_opZone!= opZoneUnSafe ) ){
+        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)}numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+        // ok, I don't have too many pending requests here..
+        if( (myTypeConts < myResources.numCores) ){
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+          // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.
+          // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
+          retVal = true
+        }else if( myTypeConts < (maxInFlightReqs_ET) ){
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+          // we have maxed out, making sure everybody is safe atleast.
+          var myActTypeOpZone = actionTypeOpZone("ET")
+          if( myActTypeOpZone <= opZoneSafe){ // WARNING: by checking for maxOpZone to be safe, it already covers by own operating type.
+            logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2.1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myActTypeOpZone: ${myActTypeOpZone} ")
+            // EXPT-WARNING: This could make me use a new machine, during init-zone of the experiments..
+            retVal = true
+          }else{ // Likely atleast one of them is in warning atleast
+            if( (myConts!=0) && (status_opZone!= opZoneUnSafe) ){
+              logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2.2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} myActTypeOpZone: ${myActTypeOpZone} ")
+              // I have atleast one container and it is atmost in warning zone, so will allow it..
+              retVal = true
+            }else{
+              logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2.2-Inv> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} myActTypeOpZone: ${myActTypeOpZone} ")
+              // this doesn't look good bro, so will just not accept this request!
+              retVal = false  
+            }
+            retVal = false
           }
+        }else{
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2-Inv> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
+          // No way JOSE! Can't have > twice the num of ET containers.
+          retVal = false
         }
-      }else{
-        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2-Inv> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
-        // No way JOSE! Can't have > twice the num of ET containers.
-        false
       }
+
     }else{
       logging.info(this,s"\t <avs_debug> <AIS> <capRem> actType neither MP or ET, HANDLE it!")
       // shouldn't come here, but putting it here just in case..
-      false
+      retVal = false
     }
+    if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
+
+    logging.info(this,s"\t <avs_debug> <AIS> <capRem> Final. invoker: ${id.toInt} has action: ${actionName} of type: ${actType} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
+    retVal 
   }
 
 }

@@ -706,16 +706,20 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
 
     //avs --begin
     //case UpdateStats(actionName: String,controllerID: Int,runtime: Long) => 
-  case UpdateStats(actionName: String,controllerID: ControllerInstanceId,runtime: Long) =>
-      avgActionRuntime.get(actionName) match {
-        case Some(curActTrackedStats) => 
-          //avgActionRuntime(actionName).addRuntime(runtime)         
-          curActTrackedStats.addRuntime(runtime)         
-          var curCpuShares = curActTrackedStats.getCurCpuShares()
-        case None => 
-          //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
-          logging.info(this, s"<avs_debug> 2. UpdateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly, HANDLE it!");         
-      }     
+  case UpdateStats(actionName: String,initTime: Long,controllerID: ControllerInstanceId,runtime: Long) =>
+      // only tracking non-cold starts..
+      if(initTime==0) {
+        avgActionRuntime.get(actionName) match {
+          case Some(curActTrackedStats) => 
+            //avgActionRuntime(actionName).addRuntime(runtime)         
+            curActTrackedStats.addRuntime(runtime)         
+            var curCpuShares = curActTrackedStats.getCurCpuShares()
+          case None => 
+            //avgActionRuntime = avgActionRuntime + (actionName -> MutableTriplet(runtime,1,))
+            logging.info(this, s"<avs_debug> 2. UpdateStats for action ${actionName} and the runtime is ${runtime} is not updated, because the triplet with transid wasn't created properly, HANDLE it!");         
+        }     
+      }
+      // But will send completion-ack to stats tracking in LB.
       // Not sure whether I want to always send it back, for now, assuming that this is the design we will stick with.
       var curActStats : toRelayActionStats = getCurActionStats(actionName,logging)
       relayActionStats(curActStats,controllerID.asString)

@@ -154,7 +154,7 @@ class AdaptiveContainerPoolBalancer(
   materializer: ActorMaterializer)
     extends CommonLoadBalancer(config, feedFactory, loadFeedFactory,controllerInstance) { 
 //extends CommonLoadBalancer(config, feedFactory,controllerInstance) // avs added loadFeedFactory
-  private var prevInvokerUsed = -1; // avs //will be helpful for round-robin
+  private var prevInvokerUsed = 0; // avs //will be helpful for round-robin
   //import loadBalancer.allInvokers //avs
 
   /** Build a cluster of all loadbalancers */
@@ -421,12 +421,11 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
 
       logging.info(this,s"<avs_debug> <schedule> 0. stepsDone: ${stepsDone} numInvokers: ${numInvokers} invoker: ${invoker.id.toInt}") // avs
       //test this invoker - if this action supports concurrency, use the scheduleConcurrent function
-      if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquireConcurrent(fqn, maxConcurrent, slots)) {
+      if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquireConcurrent(fqn, maxConcurrent, slots) && checkInvokerCapacity(invoker,actionName) ) {
         logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
-        if(checkInvokerCapacity(invoker,actionName)){
-          logging.info(this,s"<avs_debug> <schedule> 1. stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
-        }
+        //if(checkInvokerCapacity(invoker,actionName))
         Some(invoker.id, false)  
+        //
       } else {
         logging.info(this,s"<avs_debug> <schedule> 2. <all-invokers-checked> stepsDone: ${stepsDone} invoker: ${invoker.id.toInt}") // avs
         // If we've gone through all invokers
