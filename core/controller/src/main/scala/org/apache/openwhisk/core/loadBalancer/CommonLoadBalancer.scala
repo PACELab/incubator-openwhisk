@@ -245,7 +245,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
       } 
   }  
    
-  type cicType = (InvokerHealth,String) => Boolean 
+  type cicType = (InvokerHealth,String) => Boolean
   val cIC: cicType = (invoker: InvokerHealth,actionName:String) => {
     //def checkInvokerCapacity(invoker: InvokerInstanceId): Boolean = {
     logging.info(this,s"<avs_debug> <checkInvokerCapacity> on invoker: ${invoker.id.toInt}")

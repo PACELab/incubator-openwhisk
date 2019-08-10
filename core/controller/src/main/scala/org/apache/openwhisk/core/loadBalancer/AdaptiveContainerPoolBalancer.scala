@@ -19,7 +19,7 @@ package org.apache.openwhisk.core.loadBalancer
 
 import akka.actor.ActorRef
 import akka.actor.ActorRefFactory
-import java.util.concurrent.ThreadLocalRandom
+//import java.util.concurrent.ThreadLocalRandom
 
 //import akka.actor.{Actor, ActorSystem, Cancellable, Props}
 import akka.actor.{Actor, ActorSystem, Props}
@@ -142,6 +142,52 @@ import scala.concurrent.Future
  *   the invoker may skip container launch in case there is concurrent capacity available for a container launched via
  *   some other loadbalancer.
  */
+
+// avs --begin
+class AdaptiveInvokerPoolMaintenance(var activeInvokers: IndexedSeq[InvokerHealth],var inactiveInvokers: IndexedSeq[InvokerHealth]){
+  var curActiveInvoker: InvokerHealth =  activeInvokers(0); 
+
+  def checkInvokersState(): Unit = {
+
+  }
+
+/*
+  def schedule(
+    maxConcurrent: Int,
+    fqn: FullyQualifiedEntityName,
+    invokers: IndexedSeq[InvokerHealth],
+    dispatched: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]],
+    slots: Int,
+    index: Int,
+    step: Int,
+    actionName: String,
+    checkInvokerCapacity: (InvokerHealth,String) => Boolean, //avs
+    stepsDone: Int = 0
+  )(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
+  */
+  // used to push an invoker, if available, to go to active state from inactive state.
+  def upgradeInvoker(): Option[InvokerInstanceId] = {
+    Some(curActiveInvoker.id)
+  }
+
+  // used to push an invoker, if available, to go from in-active state to active state.
+
+  def downgradeInvoker(): Unit = {
+  }
+
+  def getExistingContainer(actionName:String): Option[InvokerInstanceId] = {    
+    Some(curActiveInvoker.id)
+  }
+
+  def getExistingInvoker(actionName:String,curActiveInvoker:InvokerHealth,activeInvokers:IndexedSeq[InvokerHealth]): Option[InvokerInstanceId] = {
+    Some(curActiveInvoker.id)
+  }
+
+
+}
+// avs --end
+
+
 class AdaptiveContainerPoolBalancer(
   config: WhiskConfig,
   controllerInstance: ControllerInstanceId,
@@ -254,7 +300,7 @@ class AdaptiveContainerPoolBalancer(
   /** Loadbalancer interface methods */
   override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = Future.successful(schedulingState.invokers)
   override def clusterSize: Int = schedulingState.clusterSize
-
+  
   /** 1. Publish a message to the loadbalancer */
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
     implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
@@ -264,6 +310,16 @@ class AdaptiveContainerPoolBalancer(
     val (invokersToUse, stepSizes) =
       if (!isBlackboxInvocation) (schedulingState.managedInvokers, schedulingState.managedStepSizes)
       else (schedulingState.blackboxInvokers, schedulingState.blackboxStepSizes)
+
+    // avs --begin
+    // TODO: Should change this to a sensible logic
+    // TODO: Instead of managed/blackbox invoker, should send active and inactive invokers.. 
+    var curInvokerPoolMaintenance = new AdaptiveInvokerPoolMaintenance(invokersToUse,invokersToUse)
+    //curInvokerPoolMaintenance.activeInvokers = invokersToUse 
+    curInvokerPoolMaintenance.inactiveInvokers = invokersToUse  
+    curInvokerPoolMaintenance.curActiveInvoker = invokersToUse(0) //if(invokersToUse.size>0)invokersToUse(0) else None
+    // avs --end
+
     val chosen = if (invokersToUse.nonEmpty) {
       val hash = AdaptiveContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
       // avs --begin
@@ -280,10 +336,11 @@ class AdaptiveContainerPoolBalancer(
         invokersToUse,
         schedulingState.invokerSlots,
         action.limits.memory.megabytes,
-        homeInvoker,
-        stepSize,
+        //homeInvoker,stepSize, // avs 
+        curInvokerPoolMaintenance, //avs
         action.name.asString,
         cIC)
+
       invoker.foreach {
         case (_, true) =>
           val metric =
@@ -298,7 +355,6 @@ class AdaptiveContainerPoolBalancer(
     } else {
       None
     }
-
     chosen
       .map { invoker =>
         prevInvokerUsed = invoker.toInt //avs
@@ -401,7 +457,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
    * @param step stable identifier of the entity to be scheduled
    * @return an invoker to schedule to or None of no invoker is available
    */
-  @tailrec
+  /*@tailrec
   def schedule(
     maxConcurrent: Int,
     fqn: FullyQualifiedEntityName,
@@ -450,7 +506,110 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
       }
     } else {
       None
+    }*/
+
+  //@tailrec
+  /*def getExistingContainer(actionName:String,curActiveInvoker: InvokerHealth): Option[InvokerInstanceId] = {
+    if(actionName == "imageResizing_v1"){
+      Some(curActiveInvoker.id)  
+    }else if(actionName == "invokerHealthTestAction0"){
+      Some(curActiveInvoker.id)
+    }else{
+      None
     }
+    
+  }*/
+
+
+  //@tailrec
+    def schedule(
+      maxConcurrent: Int,
+      fqn: FullyQualifiedEntityName,
+      invokers: IndexedSeq[InvokerHealth],
+      dispatched: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]],
+      slots: Int,
+      curInvokerPoolMaintenance: AdaptiveInvokerPoolMaintenance,
+      actionName: String,
+      checkInvokerCapacity: (InvokerHealth,String) => Boolean, //avs
+      stepsDone: Int = 0
+    )(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
+      //val numInvokers = invokers.size
+
+      var activeInvokers: IndexedSeq[InvokerHealth] = curInvokerPoolMaintenance.activeInvokers;
+      var curActiveInvoker: InvokerHealth = curInvokerPoolMaintenance.curActiveInvoker;
+      // 1. Check whether invokers where I have my containers can accommodate me?
+      // 2. Ok, then can I open a new invoker in an existing node?
+      // 3. Shucks, ok, will move a node from inactive state to active state.
+      //var chosenInvoker = getExistingContainer(actionName)
+
+      //val resp: Option[Boolean] = checkInvokerCapacity(curActiveInvoker,actionName)
+      /*checkInvokerCapacity(curActiveInvoker,actionName) match{
+        case Some(true) =>
+          Some(curActiveInvoker.id,true)
+        case _ =>
+          None
+      }*/
+
+      /*getExistingContainer(actionName,curActiveInvoker) match {
+        case Some (_, true) =>
+           (_.id, true) 
+        case None =>
+          None
+      } */
+
+      val invoker: Option[InvokerInstanceId] = curInvokerPoolMaintenance.getExistingContainer(actionName) //,curActiveInvoker)
+      invoker match {
+        case Some(chosenInvoker) =>
+          Some(chosenInvoker,true) //,true)
+        case None =>
+          val newInvokerForAction: Option[InvokerInstanceId] = curInvokerPoolMaintenance.getExistingInvoker(actionName,curActiveInvoker,activeInvokers) 
+          newInvokerForAction match{ 
+            case Some(chosenNewInvoker) =>  
+              Some (chosenNewInvoker,true)
+            case None =>
+              val newActiveInvoker: Option[InvokerInstanceId] = curInvokerPoolMaintenance.upgradeInvoker() //actionName,curActiveInvoker,activeInvokers) 
+              newActiveInvoker match{ 
+                case Some (newChosenInvoker) => 
+                  val newChosenInvokerHealth = activeInvokers(newChosenInvoker.toInt)
+                  if(checkInvokerCapacity(newChosenInvokerHealth,actionName)){
+                    Some(newChosenInvoker,true)
+                  }else{
+                    None
+                  }
+                case None =>
+                  None
+              }
+              
+          }
+      }
+
+      /* val invoker: Option[(InvokerInstanceId, Boolean)] = getExistingContainer(actionName,curActiveInvoker)
+      invoker.foreach {
+        case (chosenInvoker, true) =>  
+          (chosenInvoker,true)
+        case _ => // ok, all the existing containers are busy/unsafe, spawn a new container in existing container?
+          None
+          /*val newInvokerForAction: Option[(InvokerInstanceId, Boolean)] = curInvokerPoolMaintenance.getExistingInvoker(actionName,curActiveInvoker,activeInvokers) 
+          newInvokerForAction.foreach{ 
+            case (chosenNewInvoker, true) =>  
+              (chosenNewInvoker,true)
+            case _ =>
+              val newActiveInvoker: Option[(InvokerInstanceId, Boolean)] = curInvokerPoolMaintenance.upgradeInvoker() //actionName,curActiveInvoker,activeInvokers) 
+              newActiveInvoker.foreach{ 
+                case (newChosenInvoker, true) => 
+                  val newChosenInvokerHealth = activeInvokers(newChosenInvoker.toInt)
+                  if(checkInvokerCapacity(newChosenInvokerHealth,actionName)){
+                    Some(newActiveInvoker,true)
+                  }else{
+                    None
+                  }
+                case _ =>
+                  None
+              }
+              
+          }*/
+      }*/
+    
   }
 }
 

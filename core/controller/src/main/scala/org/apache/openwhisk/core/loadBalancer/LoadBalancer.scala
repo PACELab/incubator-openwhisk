@@ -154,12 +154,14 @@ class ActionStats(val actionName:String,logging: Logging){
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
         curInvokerActStats.numConts = toUpdateNumConts
         curInvokerActStats.movingAvgLatency = movingAvgLatency
+        curInvokerActStats.lastUpdated = Instant.now.toEpochMilli
       case None =>
         usedInvokers = usedInvokers + (invoker -> new ActionStatsPerInvoker(actionName,invoker.toInt,logging))
         var tempInvokerActStats: ActionStatsPerInvoker = usedInvokers(invoker)
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
         tempInvokerActStats.numConts = toUpdateNumConts
         tempInvokerActStats.movingAvgLatency = movingAvgLatency
+        tempInvokerActStats.lastUpdated = Instant.now.toEpochMilli
     }
   }
 
@@ -374,7 +376,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
 
     logging.info(this,s"\t <avs_debug> <AIS> <capRem> Final. invoker: ${id.toInt} has action: ${actionName} of type: ${actType} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
-    retVal 
+    retVal
   }
 
 }
