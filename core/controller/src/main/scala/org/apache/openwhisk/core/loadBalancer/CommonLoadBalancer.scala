@@ -67,10 +67,15 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
 
   protected val invokerPool: ActorRef
 
-  protected[loadBalancer] var curRunningActions = mutable.Map.empty[String, ActionStats] // avs
-  
-  var allInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]//avs
+  // avs --begin
+  protected[loadBalancer] var curRunningActions = mutable.Map.empty[String, ActionStats] 
+  var allInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
 
+  var lastUpdatedTime: Long = 0
+  var scanIntervalInMS: Long = 10*1000 // 10 seconds!
+  // i.e. if  I have more than (acceptableUnsafeInvokerRatio*100)% invokers which are unsafe in either of the workload types, I will upgrade an invoker..
+  var acceptableUnsafeInvokerRatio = 0.75 
+  // avs --end
   /** State related to invocations and throttling */
   protected[loadBalancer] val activationSlots = TrieMap[ActivationId, ActivationEntry]()
   protected[loadBalancer] val activationPromises =
@@ -229,6 +234,66 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   }
 
 // avs --begin
+
+  type ntuiType = (ListBuffer[InvokerHealth]) => Boolean
+  //def needToUpgradeInvoker(activeInvokers: ListBuffer[InvokerHealth]): Boolean = {
+  val nTUI: ntuiType = (activeInvokers: ListBuffer[InvokerHealth]) => {
+        var numUnsafeInvokers = 0 
+        var retVal: Boolean = false
+
+        activeInvokers.foreach{
+          curInvoker =>
+            var someWorkloadUnsafe: Boolean = false
+            allInvokers.get(curInvoker.id) match {
+              case Some(curInvokerStats) =>
+                logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is PRESENT in allInvokers. Before checking this invoker, numUnsafeInvokers: ${numUnsafeInvokers} ")
+                someWorkloadUnsafe = curInvokerStats.checkInvokerStatus()
+              case None =>
+                allInvokers = allInvokers + (curInvoker.id -> new AdapativeInvokerStats(curInvoker.id,curInvoker.status,logging) )
+                logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is ABSENT in allInvokers. Before checking this invoker, numUnsafeInvokers: ${numUnsafeInvokers}. This shouldn't happen, HANDLE it!!")
+                var tempInvokerStats = allInvokers(curInvoker.id)
+                tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+                someWorkloadUnsafe = tempInvokerStats.checkInvokerStatus()
+              }          
+            if(someWorkloadUnsafe)
+              numUnsafeInvokers+=1
+        }
+
+        if(activeInvokers.size > 0){
+          if( (numUnsafeInvokers.toDouble/activeInvokers.size) > acceptableUnsafeInvokerRatio ){
+            logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> <Res-1> numUnsafeInvokers: ${numUnsafeInvokers} activeInvokers.size: ${activeInvokers.size} and acceptableUnsafeInvokerRatio: ${acceptableUnsafeInvokerRatio}")
+            retVal = true
+          }else{
+            logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> <Res-2> numUnsafeInvokers: ${numUnsafeInvokers} activeInvokers.size: ${activeInvokers.size} and acceptableUnsafeInvokerRatio: ${acceptableUnsafeInvokerRatio}")
+          }
+        }
+
+      retVal 
+    }
+
+    def needToDowngradeInvoker(activeInvokers: ListBuffer[InvokerHealth]): ListBuffer[InvokerHealth] = {
+      var toFillBuf: ListBuffer[InvokerHealth] = new mutable.ListBuffer[InvokerHealth]
+      // getActiveNumConts
+      activeInvokers.foreach{
+        curInvoker =>
+        allInvokers.get(curInvoker.id) match {
+          case Some(curInvokerStats) =>
+          logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is PRESENT in allInvokers. Before checking this invoker, toFillBuf.size: ${toFillBuf.size} ")
+          if(curInvokerStats.getActiveNumConts() == 0){ // don't have any active containers..
+            toFillBuf+=curInvoker
+          }
+        case None =>
+          allInvokers = allInvokers + (curInvoker.id -> new AdapativeInvokerStats(curInvoker.id,curInvoker.status,logging) )
+          logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is ABSENT in allInvokers. Before checking this invoker, toFillBuf.size: ${toFillBuf.size}. This shouldn't happen, HANDLE it!!")
+          var tempInvokerStats = allInvokers(curInvoker.id)
+          tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+          if(tempInvokerStats.getActiveNumConts() == 0){ // don't have any active containers..
+            toFillBuf+=curInvoker
+          }
+        }
+      }
+      toFillBuf
+    }
 
   //type gifaType (String,InvokerHealth) => Option[InvokerInstanceId]
   type guifaType = (String) => Option[InvokerInstanceId]

@@ -134,6 +134,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
       logging.info(this,s"\t <avs_debug> <ASPI> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} latencyRatio: ${latencyRatio} toleranceRatio: ${toleranceRatio} is evidently in a weird region, so it should be declared UNSAFE --${opZone}") 
     }
   }
+
   def resetStats(curTime: Long): Unit = {
     logging.info(this,s"\t <avs_debug> <ASPI> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats since: curTime: ${curTime} is larger than lastUpdated: ${lastUpdated} by ${statsTimeoutInMilli} ") 
     opZone = 0 
@@ -339,6 +340,22 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       numConts = numConts + (curActType -> accumNumConts)
       logging.info(this,s"\t <avs_debug> <AIS> <updateActTypeStats> For actType: ${curActType} maxOpZone: ${maxOpZone} accumNumConts: ${accumNumConts}")    
     }
+  }
+
+  def checkInvokerStatus(): Boolean = {
+    var retVal: Boolean = false
+    updateActTypeStats()
+    if(actionTypeOpZone("ET")==opZoneUnSafe){
+      retVal = true
+    }else if(actionTypeOpZone("ET")==opZoneUnSafe){
+      retVal = true
+    }
+    retVal
+  }
+
+  def getActiveNumConts(): Int = {
+    updateActTypeStats() 
+    numConts("ET")+numConts("MP")
   }
 
   def capacityRemaining(actionName:String): Boolean = { // should update based on -- memory; #et, #mp and operating zone

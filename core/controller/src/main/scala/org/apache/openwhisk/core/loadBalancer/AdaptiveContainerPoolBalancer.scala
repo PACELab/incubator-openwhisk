@@ -43,6 +43,7 @@ import scala.annotation.tailrec
 import scala.concurrent.Future
 import scala.collection.mutable //avs
 import scala.collection.mutable.ListBuffer //avs
+import java.time.Instant // avs
 
 /**
  * A loadbalancer that schedules workload based on a hashing-algorithm.
@@ -149,6 +150,7 @@ import scala.collection.mutable.ListBuffer //avs
 //class AdaptiveInvokerPoolMaintenance(var activeInvokers: IndexedSeq[InvokerHealth],var inactiveInvokers: IndexedSeq[InvokerHealth]){
 class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealth],var inactiveInvokers: ListBuffer[InvokerHealth],logging: Logging){
   var curActiveInvoker: InvokerHealth =  activeInvokers(0); 
+  var shouldUpgradeInvoker: Boolean = false
 
   def checkInvokersState(): Unit = {
 
@@ -170,22 +172,13 @@ class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealt
 
   // used to push an invoker, if available, to go from in-active state to active state.
 
-  def downgradeInvoker(): Unit = {
-    if(activeInvokers.size>0){
-      var toYieldInvoker: InvokerHealth = activeInvokers.remove(activeInvokers.size-1) // 0-indexed!
-      inactiveInvokers+=toYieldInvoker
-    }else{
-
+  def downgradeInvoker(toDowngradeInvoker: ListBuffer[InvokerHealth]): Unit = {
+    toDowngradeInvoker.foreach{
+      curInvoker =>
+      activeInvokers-=curInvoker // might crash if there is a race condition!
+      inactiveInvokers+=curInvoker // this is OK..
     }
   }
-
-  /*def getExistingContainer(actionName:String): Option[InvokerInstanceId] = {    
-    Some(curActiveInvoker.id)
-  }
-
-  def getExistingInvoker(actionName:String,curActiveInvoker:InvokerHealth,activeInvokers:IndexedSeq[InvokerHealth]): Option[InvokerInstanceId] = {
-    Some(curActiveInvoker.id)
-  }*/
 
 
 }
@@ -349,7 +342,7 @@ class AdaptiveContainerPoolBalancer(
         //homeInvoker,stepSize, // avs 
         curInvokerPoolMaintenance, //avs
         action.name.asString,
-        cIC, gUIFA, gaI)
+        cIC, gUIFA, gaI,nTUI)
 
       invoker.foreach {
         case (_, true) =>
@@ -365,6 +358,27 @@ class AdaptiveContainerPoolBalancer(
     } else {
       None
     }
+
+// avs --begin
+    var curInstant: Long = Instant.now.toEpochMilli
+    if( (curInstant -lastUpdatedTime ) > scanIntervalInMS){
+        lastUpdatedTime = curInstant
+        logging.info(this,s"<avs_debug> <AdaptiveContainerPoolBalancer> <publish> Calling schedule for activation ${msg.activationId} for '${msg.action.asString}' ($actionType) ") // avs
+        
+        // Should do this organically too, but how? Maybe, if am chekcing all the invokers, should update the flag..
+        //if(needToUpgradeInvoker(activeInvokersBuffer)){
+        if(nTUI(activeInvokersBuffer)){
+          curInvokerPoolMaintenance.upgradeInvoker()
+        }else{
+          //var invokersToDowngrade: ListBuffer[InvokerHealth] = needToDowngradeInvoker(activeInvokers)
+          curInvokerPoolMaintenance.downgradeInvoker(needToDowngradeInvoker(activeInvokersBuffer))
+        }
+        
+      }else if(curInvokerPoolMaintenance.shouldUpgradeInvoker){
+        curInvokerPoolMaintenance.upgradeInvoker()
+      }
+// avs --end
+
     chosen
       .map { invoker =>
         prevInvokerUsed = invoker.toInt //avs
@@ -385,6 +399,8 @@ class AdaptiveContainerPoolBalancer(
         logging.error(this, s"failed to schedule $actionType action, invokers to use: $invokerStates")
         Future.failed(LoadBalancerException("No invokers available"))
       }
+
+
   }
 
   override val invokerPool =
@@ -479,7 +495,8 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
       actionName: String,
       checkInvokerCapacity: (InvokerHealth,String) => Boolean, //avs
       getUsedInvokerForAction :(String) => Option[InvokerInstanceId],
-      getActiveInvoker: (String, ListBuffer[InvokerHealth]) => Option[InvokerInstanceId]      
+      getActiveInvoker: (String, ListBuffer[InvokerHealth]) => Option[InvokerInstanceId],
+      needToUpgradeInvoker: (ListBuffer[InvokerHealth])=> Boolean       
     )(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
       //val numInvokers = invokers.size
 
@@ -501,6 +518,9 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
           newInvokerForAction match{ 
             case Some(chosenNewInvoker) =>  
               logging.info(this,s"<avs_debug> <schedule> 1.2, got an invoker from getActiveInvoker ") // avs
+              if(needToUpgradeInvoker(activeInvokers)){
+                curInvokerPoolMaintenance.shouldUpgradeInvoker = true
+              }
               Some (chosenNewInvoker,true)
             case None =>
               logging.info(this,s"<avs_debug> <schedule> 1.21, DID-NOT get an invoker from getActiveInvoker ") // avs
