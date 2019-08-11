@@ -182,28 +182,36 @@ class ActionStats(val actionName:String,logging: Logging){
     }
   } 
 
-  //curActStats.getInvoker(actionName) 
-  def getInvoker(): Option[InvokerInstanceId] = {
-    var foundAnInvoker = false
-
+  //curActStats.getUsedInvoker(actionName) 
+  def getUsedInvoker(): Option[InvokerInstanceId] = {
     usedInvokers.keys.foreach{
       curInvoker => 
       var curInvokerStats:AdapativeInvokerStats  = usedInvokers(curInvoker)
+      logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
       // If I fit, I will choose this.
       // TODO: Change this so that I iterate based on some "ranking"
-      if(curInvokerStats.capacityRemaining(actionName)){ 
-        foundAnInvoker = true
+      if(curInvokerStats.capacityRemaining(actionName))
         Some(curInvoker)
-      }
     }
     // if it has come here, then I don't have anything..     
+    logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get a used invoker :( :( ")
     None
-    /*if(!foundAnInvoker){
-      None
-    }*/
-
   } 
 
+  def getActiveInvoker(activeInvokers: ListBuffer[InvokerHealth]): Option[InvokerInstanceId] = {
+    activeInvokers.foreach{
+      curInvoker => 
+      var curInvokerStats:AdapativeInvokerStats  = usedInvokers(curInvoker.id)
+      logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName}, invoker: ${curInvoker.id.toInt} checking whether it has any capacityRemaining...")
+      // If I fit, I will choose this.
+      // TODO: Change this so that I iterate based on some "ranking"
+      if(curInvokerStats.capacityRemaining(actionName))
+        Some(curInvoker.id)
+    }
+    // if it has come here, then I don't have anything..     
+    logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get an active invoker :( :( ")
+    None
+  } 
 
 }
 

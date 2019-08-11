@@ -38,7 +38,7 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 import scala.collection.mutable //avs
-//import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.ListBuffer
 //import scala.collection.immutable //avs
 
 
@@ -231,25 +231,37 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
 // avs --begin
 
   //type gifaType (String,InvokerHealth) => Option[InvokerInstanceId]
-  type gifaType = (String) => Option[InvokerInstanceId]
-  //def getInvokerForAction(actionName: String,invoker: InvokerHealth): Option[InvokerInstanceId] = {
-  val gIFA: gifaType = (actionName: String) => {
-    //var curInvokerStats = getInvokerTracking(invoker) // assuming that this'd never fail! 
+  type guifaType = (String) => Option[InvokerInstanceId]
+  //def getUsedInvokerForAction(actionName: String,invoker: InvokerHealth): Option[InvokerInstanceId] = {
+  val gUIFA: guifaType = (actionName: String) => {
     curRunningActions.get(actionName) match {
       case Some(curActStats) => 
-        logging.info(this,s"<avs_debug> <getInvokerForAction> action: ${actionName} is PRESENT in curRunningActions")
-        curActStats.getInvoker()//,curInvokerStats)
+        logging.info(this,s"<avs_debug> <getUsedInvokerForAction> action: ${actionName} is PRESENT in curRunningActions")
+        curActStats.getUsedInvoker()
       case None => 
-        logging.info(this,s"<avs_debug> <getInvokerForAction> action: ${actionName} is ABSENT in curRunningActions")
+        logging.info(this,s"<avs_debug> <getUsedInvokerForAction> action: ${actionName} is ABSENT in curRunningActions")
         
         curRunningActions = curRunningActions + (actionName-> new ActionStats(actionName,logging))
-
         var myActStats :ActionStats = curRunningActions(actionName)
-        myActStats.getInvoker()//,curInvokerStats)
+        myActStats.getUsedInvoker()
     }
-
   } 
   
+  //def getActiveInvoker(actionName:String,curActiveInvoker:InvokerHealth,activeInvokers:IndexedSeq[InvokerHealth]): Option[InvokerInstanceId]
+  type gaiType =  (String,ListBuffer[InvokerHealth]) => Option[InvokerInstanceId]
+  val gaI: gaiType = (actionName:String,activeInvokers:ListBuffer[InvokerHealth]) => {
+    curRunningActions.get(actionName) match {
+      case Some(curActStats) => 
+        logging.info(this,s"<avs_debug> <getActiveInvoker-0> action: ${actionName} is PRESENT in curRunningActions")
+        curActStats.getActiveInvoker(activeInvokers)
+      case None => 
+        logging.info(this,s"<avs_debug> <getActiveInvoker-0> action: ${actionName} is ABSENT in curRunningActions")
+        curRunningActions = curRunningActions + (actionName-> new ActionStats(actionName,logging))
+        var myActStats :ActionStats = curRunningActions(actionName)
+        myActStats.getActiveInvoker(activeInvokers)
+    }
+  }
+
   type aitype = (InvokerHealth,Int,Int) => Unit
   val aIT: aitype = (invoker: InvokerHealth,numCores:Int,memorySize:Int) => {
   //def addInvokerTracking(invoker: InvokerInstanceId,numCores:Int,memorySize:Int): Unit = {
