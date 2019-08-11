@@ -142,13 +142,15 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
     lastUpdated = Instant.now.toEpochMilli
     // EXPT-WARNING: Might be better to issue a load request and refresh stats!, instead of resetting willy nilly!
   }
+
 }
 
 // the stats of an action across all invokers. Tracked per Invoker.
 class ActionStats(val actionName:String,logging: Logging){
-  var usedInvokers = mutable.Map.empty[InvokerInstanceId, ActionStatsPerInvoker]
+  //var usedInvokers = mutable.Map.empty[InvokerInstanceId, ActionStatsPerInvoker]
+  var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
 
-  def addActionStats(invoker: InvokerInstanceId,movingAvgLatency: Long, toUpdateNumConts: Int){
+  /*def addActionStats(invoker: InvokerInstanceId,movingAvgLatency: Long, toUpdateNumConts: Int){
     usedInvokers.get(invoker) match{
       case Some(curInvokerActStats) =>
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
@@ -163,7 +165,45 @@ class ActionStats(val actionName:String,logging: Logging){
         tempInvokerActStats.movingAvgLatency = movingAvgLatency
         tempInvokerActStats.lastUpdated = Instant.now.toEpochMilli
     }
-  }
+  } */
+
+  def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,movingAvgLatency: Long, toUpdateNumConts: Int){
+    usedInvokers.get(invoker) match{
+      case Some(curInvokerStats) =>
+        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
+        // updateActionStats(toUpdateAction:String, movingAvgLatency: Long, toUpdateNumConts:Int):Unit = {
+        curInvokerStats.updateActionStats(actionName,movingAvgLatency,toUpdateNumConts)
+      case None =>
+        usedInvokers = usedInvokers + (invoker -> invokerStats)
+        var tempInvokerStats:AdapativeInvokerStats  = usedInvokers(invoker)
+        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
+        tempInvokerStats.updateActionStats(actionName,movingAvgLatency,toUpdateNumConts)
+
+    }
+  } 
+
+  //curActStats.getInvoker(actionName) 
+  def getInvoker(): Option[InvokerInstanceId] = {
+    var foundAnInvoker = false
+
+    usedInvokers.keys.foreach{
+      curInvoker => 
+      var curInvokerStats:AdapativeInvokerStats  = usedInvokers(curInvoker)
+      // If I fit, I will choose this.
+      // TODO: Change this so that I iterate based on some "ranking"
+      if(curInvokerStats.capacityRemaining(actionName)){ 
+        foundAnInvoker = true
+        Some(curInvoker)
+      }
+    }
+    // if it has come here, then I don't have anything..     
+    None
+    /*if(!foundAnInvoker){
+      None
+    }*/
+
+  } 
+
 
 }
 

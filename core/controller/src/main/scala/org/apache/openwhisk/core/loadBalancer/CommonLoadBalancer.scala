@@ -230,6 +230,26 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
 
 // avs --begin
 
+  //type gifaType (String,InvokerHealth) => Option[InvokerInstanceId]
+  type gifaType = (String) => Option[InvokerInstanceId]
+  //def getInvokerForAction(actionName: String,invoker: InvokerHealth): Option[InvokerInstanceId] = {
+  val gIFA: gifaType = (actionName: String) => {
+    //var curInvokerStats = getInvokerTracking(invoker) // assuming that this'd never fail! 
+    curRunningActions.get(actionName) match {
+      case Some(curActStats) => 
+        logging.info(this,s"<avs_debug> <getInvokerForAction> action: ${actionName} is PRESENT in curRunningActions")
+        curActStats.getInvoker()//,curInvokerStats)
+      case None => 
+        logging.info(this,s"<avs_debug> <getInvokerForAction> action: ${actionName} is ABSENT in curRunningActions")
+        
+        curRunningActions = curRunningActions + (actionName-> new ActionStats(actionName,logging))
+
+        var myActStats :ActionStats = curRunningActions(actionName)
+        myActStats.getInvoker()//,curInvokerStats)
+    }
+
+  } 
+  
   type aitype = (InvokerHealth,Int,Int) => Unit
   val aIT: aitype = (invoker: InvokerHealth,numCores:Int,memorySize:Int) => {
   //def addInvokerTracking(invoker: InvokerInstanceId,numCores:Int,memorySize:Int): Unit = {
@@ -245,6 +265,21 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
       } 
   }  
    
+  def getInvokerTracking(invoker: InvokerInstanceId): AdapativeInvokerStats = {
+    logging.info(this,s"<avs_debug> <getInvokerTracking> on invoker: ${invoker.toInt}")
+    allInvokers.get(invoker) match {
+      case Some(curInvokerStats) =>
+        logging.info(this,s"<avs_debug> in <getInvokerTracking> invoker: ${invoker.toInt} is PRESENT in allInvokers ")
+        curInvokerStats
+      case None =>
+        allInvokers = allInvokers + (invoker -> new AdapativeInvokerStats(invoker,InvokerState.Healthy,logging) )
+        logging.info(this,s"<avs_debug> in <getInvokerTracking> invoker: ${invoker.toInt} is ABSENT in allInvokers. Didn't expect this, HANDLE it!! ")
+        var tempInvokerStats = allInvokers(invoker)
+        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+        tempInvokerStats
+    } 
+  } 
+
   type cicType = (InvokerHealth,String) => Boolean
   val cIC: cicType = (invoker: InvokerHealth,actionName:String) => {
     //def checkInvokerCapacity(invoker: InvokerInstanceId): Boolean = {
@@ -285,22 +320,25 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     val raw = new String(bytes, StandardCharsets.UTF_8)
 
     ActionStatsMessage.parse(raw) match {
+      
       case Success(m: ActionStatsMessage) =>
         logging.info(this,s"<avs_debug> <processLoadResponse> ActionStatsMessage successfully parsed! m.Str: ${m.toString}")
+        var curInvokerStats = getInvokerTracking(m.invoker) // assuming that this'd never fail! 
         curRunningActions.get(m.curActName) match {
           case Some(curActStats) => 
             logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is PRESENT in curRunningActions and it ran on invoker: ${m.invoker.toInt}")
-            curActStats.addActionStats(m.invoker,m.avgLatency,m.numConts) // curActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
+            //curActStats.addActionStats(m.invoker,m.avgLatency,m.numConts) // curActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
+            curActStats.addActionStats(m.invoker,curInvokerStats,m.avgLatency,m.numConts)
           case None => 
             logging.info(this,s"<avs_debug> <processLoadResponse> action: ${m.curActName} is ABSENT in curRunningActions  and it ran on invoker: ${m.invoker.toInt}")
+            
             curRunningActions = curRunningActions + (m.curActName -> new ActionStats(m.curActName,logging))
-
+            //curRunningActions = curRunningActions + (m.curActName -> curInvokerStats)
             var myActStats :ActionStats = curRunningActions(m.curActName)
-            myActStats.addActionStats(m.invoker,m.avgLatency,m.numConts) //myActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
+            myActStats.addActionStats(m.invoker,curInvokerStats,m.avgLatency,m.numConts) //myActStats.simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
         }
 
-        addActionStatsToInvoker(m.invoker,m.curActName,m.avgLatency,m.numConts)
-        //simplePrint(m.curActName,m.avgLatency,m.numConts,logging)
+        //addActionStatsToInvoker(m.invoker,m.curActName,m.avgLatency,m.numConts)
       case Failure(t) =>
         logging.info(this,s"<avs_debug> <processLoadResponse> ActionStatsMessage wasn't parsed! raw: ${raw}")
     }    
