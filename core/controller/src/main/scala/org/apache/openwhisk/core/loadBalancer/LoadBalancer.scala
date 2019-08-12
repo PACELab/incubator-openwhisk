@@ -30,6 +30,7 @@ import scala.collection.mutable //avs
 import scala.collection.immutable //avs
 import scala.collection.mutable.ListBuffer //avs
 import java.time.Instant // avs
+import scala.collection.immutable.ListMap // avs
 //import util.control.Breaks._ // avs
 // avs --begin
 
@@ -150,38 +151,39 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
 // the stats of an action across all invokers. Tracked per Invoker.
 class ActionStats(val actionName:String,logging: Logging){
   var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
+  var lastInstantUsed = mutable.Map.empty[InvokerInstanceId, Long]
 
   def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,movingAvgLatency: Long, toUpdateNumConts: Int){
+    var curInstant: Long = Instant.now.toEpochMilli
     usedInvokers.get(invoker) match{
       case Some(curInvokerStats) =>
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
         // updateActionStats(toUpdateAction:String, movingAvgLatency: Long, toUpdateNumConts:Int):Unit = {
         curInvokerStats.updateActionStats(actionName,movingAvgLatency,toUpdateNumConts)
+        //lastInstantUsed(invoker) = curInstant // should be ok, but will only update when it is allocated..
       case None =>
         usedInvokers = usedInvokers + (invoker -> invokerStats)
+        lastInstantUsed = lastInstantUsed + (invoker -> curInstant)
         var tempInvokerStats:AdapativeInvokerStats  = usedInvokers(invoker)
-        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
+        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency} at instant: ${curInstant}")
         tempInvokerStats.updateActionStats(actionName,movingAvgLatency,toUpdateNumConts)
     }
   } 
 
   def getUsedInvoker(): Option[InvokerInstanceId] = {
-    var lastCheckedIdx = -1
-    var curIdx = -1
-    var breakCondtn: Boolean = false
 
-    usedInvokers.keys.foreach{
+    ListMap(lastInstantUsed.toSeq.sortWith(_._2 > _._2):_*).keys.foreach{
       curInvoker => 
-      curIdx+=1 
+      logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} was the invoker used at ${lastInstantUsed(curInvoker)}")
       usedInvokers.get(curInvoker) match {
         case Some(curInvokerStats) => 
           logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
           // If I fit, I will choose this.
           // TODO: Change this so that I iterate based on some "ranking"
           if(curInvokerStats.capacityRemaining(actionName)){
-            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding??")  
-            breakCondtn = true
-            lastCheckedIdx = curIdx
+            var curInstant: Long = Instant.now.toEpochMilli
+            lastInstantUsed(curInvoker) = curInstant
+            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
             return Some(curInvoker)
           }
         case None =>
@@ -189,6 +191,25 @@ class ActionStats(val actionName:String,logging: Logging){
       }
 
     }
+
+    /*usedInvokers.keys.foreach{
+      curInvoker => 
+      usedInvokers.get(curInvoker) match {
+        case Some(curInvokerStats) => 
+          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
+          // If I fit, I will choose this.
+          // TODO: Change this so that I iterate based on some "ranking"
+          if(curInvokerStats.capacityRemaining(actionName)){
+            var curInstant: Long = Instant.now.toEpochMilli
+            lastInstantUsed(curInvoker) = curInstant
+            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
+            return Some(curInvoker)
+          }
+        case None =>
+          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
+      }
+
+    } */
 
     logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get a used invoker :( :( ")
     None
@@ -204,7 +225,11 @@ class ActionStats(val actionName:String,logging: Logging){
           // If I fit, I will choose this.
           // TODO: Change this so that I iterate based on some "ranking"
           if(curInvokerStats.capacityRemaining(actionName)){
-            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.id.toInt} supposedly has capacity, am I yielding??")  
+
+            var curInstant: Long = Instant.now.toEpochMilli
+            lastInstantUsed(curInvoker.id) = curInstant
+            logging.info(this,s"\t <avs_debug> <getActiveInvoker> Invoker: ${curInvoker.id.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker.id)}")  
+
             return Some(curInvoker.id)
           }
         case None =>
@@ -212,7 +237,7 @@ class ActionStats(val actionName:String,logging: Logging){
       }
     }
     // if it has come here, then I don't have anything..     
-    logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get an active invoker :( :( ")
+    logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName} did not get an active invoker :( :( ")
     None
   } 
 
