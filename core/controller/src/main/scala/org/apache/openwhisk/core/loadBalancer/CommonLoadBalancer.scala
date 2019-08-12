@@ -72,7 +72,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   var allInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
 
   var lastUpdatedTime: Long = 0
-  var scanIntervalInMS: Long = 60*1000 // 10 seconds!
+  var scanIntervalInMS: Long = 60*1000 // 60 seconds!
   // i.e. if  I have more than (acceptableUnsafeInvokerRatio*100)% invokers which are unsafe in either of the workload types, I will upgrade an invoker..
   var acceptableUnsafeInvokerRatio = 0.75 
   // avs --end
@@ -278,13 +278,13 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
         curInvoker =>
         allInvokers.get(curInvoker.id) match {
           case Some(curInvokerStats) =>
-          logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is PRESENT in allInvokers. Before checking this invoker, toFillBuf.size: ${toFillBuf.size} ")
+          logging.info(this,s"<avs_debug> in <needToDowngradeInvoker> invoker: ${curInvoker.id.toInt} is PRESENT in allInvokers. Before checking this invoker, toFillBuf.size: ${toFillBuf.size} ")
           if(curInvokerStats.getActiveNumConts() == 0){ // don't have any active containers..
             toFillBuf+=curInvoker
           }
         case None =>
           allInvokers = allInvokers + (curInvoker.id -> new AdapativeInvokerStats(curInvoker.id,curInvoker.status,logging) )
-          logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is ABSENT in allInvokers. Before checking this invoker, toFillBuf.size: ${toFillBuf.size}. This shouldn't happen, HANDLE it!!")
+          logging.info(this,s"<avs_debug> in <needToDowngradeInvoker> invoker: ${curInvoker.id.toInt} is ABSENT in allInvokers. Before checking this invoker, toFillBuf.size: ${toFillBuf.size}. This shouldn't happen, HANDLE it!!")
           var tempInvokerStats = allInvokers(curInvoker.id)
           tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
           if(tempInvokerStats.getActiveNumConts() == 0){ // don't have any active containers..

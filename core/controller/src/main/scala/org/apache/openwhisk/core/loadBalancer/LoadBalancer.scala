@@ -149,25 +149,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
 
 // the stats of an action across all invokers. Tracked per Invoker.
 class ActionStats(val actionName:String,logging: Logging){
-  //var usedInvokers = mutable.Map.empty[InvokerInstanceId, ActionStatsPerInvoker]
   var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
-
-  /*def addActionStats(invoker: InvokerInstanceId,movingAvgLatency: Long, toUpdateNumConts: Int){
-    usedInvokers.get(invoker) match{
-      case Some(curInvokerActStats) =>
-        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
-        curInvokerActStats.numConts = toUpdateNumConts
-        curInvokerActStats.movingAvgLatency = movingAvgLatency
-        curInvokerActStats.lastUpdated = Instant.now.toEpochMilli
-      case None =>
-        usedInvokers = usedInvokers + (invoker -> new ActionStatsPerInvoker(actionName,invoker.toInt,logging))
-        var tempInvokerActStats: ActionStatsPerInvoker = usedInvokers(invoker)
-        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
-        tempInvokerActStats.numConts = toUpdateNumConts
-        tempInvokerActStats.movingAvgLatency = movingAvgLatency
-        tempInvokerActStats.lastUpdated = Instant.now.toEpochMilli
-    }
-  } */
 
   def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,movingAvgLatency: Long, toUpdateNumConts: Int){
     usedInvokers.get(invoker) match{
@@ -183,7 +165,6 @@ class ActionStats(val actionName:String,logging: Logging){
     }
   } 
 
-  //curActStats.getUsedInvoker(actionName) 
   def getUsedInvoker(): Option[InvokerInstanceId] = {
     var lastCheckedIdx = -1
     var curIdx = -1
@@ -376,7 +357,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
   def getActiveNumConts(): Int = {
     updateActTypeStats() 
-    numConts("ET")+numConts("MP")
+    numConts("ET")+inFlightReqsByType("ET")+numConts("MP")+inFlightReqsByType("MP")
   }
 
   def capacityRemaining(actionName:String): Boolean = { // should update based on -- memory; #et, #mp and operating zone
@@ -420,7 +401,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     else if(actType == "ET"){
       logging.info(this,s"\t <avs_debug> <AIS> <capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
       if ( ( inFlightReqsByType(actType) < maxInFlightReqs_ET) && (status_opZone!= opZoneUnSafe ) ){
-        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)}numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+        logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
         // ok, I don't have too many pending requests here..
         if( (myTypeConts < myResources.numCores) ){
           logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
@@ -448,7 +429,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
             retVal = false
           }
         }else{
-          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2-Inv> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2-Inv> invoker: ${id.toInt} maxInFlightReqs_ET: ${maxInFlightReqs_ET} myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
           // No way JOSE! Can't have > twice the num of ET containers.
           retVal = false
         }

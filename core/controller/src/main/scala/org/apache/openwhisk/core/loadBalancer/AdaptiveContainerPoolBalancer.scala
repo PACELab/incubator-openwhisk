@@ -45,107 +45,6 @@ import scala.collection.mutable //avs
 import scala.collection.mutable.ListBuffer //avs
 import java.time.Instant // avs
 
-/**
- * A loadbalancer that schedules workload based on a hashing-algorithm.
- *
- * ## Algorithm
- *
- * At first, for every namespace + action pair a hash is calculated and then an invoker is picked based on that hash
- * (`hash % numInvokers`). The determined index is the so called "home-invoker". This is the invoker where the following
- * progression will **always** start. If this invoker is healthy (see "Invoker health checking") and if there is
- * capacity on that invoker (see "Capacity checking"), the request is scheduled to it.
- *
- * If one of these prerequisites is not true, the index is incremented by a step-size. The step-sizes available are the
- * all coprime numbers smaller than the amount of invokers available (coprime, to minimize collisions while progressing
- * through the invokers). The step-size is picked by the same hash calculated above (`hash & numStepSizes`). The
- * home-invoker-index is now incremented by the step-size and the checks (healthy + capacity) are done on the invoker
- * we land on now.
- *
- * This procedure is repeated until all invokers have been checked at which point the "overload" strategy will be
- * employed, which is to choose a healthy invoker randomly. In a steadily running system, that overload means that there
- * is no capacity on any invoker left to schedule the current request to.
- *
- * If no invokers are available or if there are no healthy invokers in the system, the loadbalancer will return an error
- * stating that no invokers are available to take any work. Requests are not queued anywhere in this case.
- *
- * An example:
- * - availableInvokers: 10 (all healthy)
- * - hash: 13
- * - homeInvoker: hash % availableInvokers = 13 % 10 = 3
- * - stepSizes: 1, 3, 7 (note how 2 and 5 is not part of this because it's not coprime to 10)
- * - stepSizeIndex: hash % numStepSizes = 13 % 3 = 1 => stepSize = 3
- *
- * Progression to check the invokers: 3, 6, 9, 2, 5, 8, 1, 4, 7, 0 --> done
- *
- * This heuristic is based on the assumption, that the chance to get a warm container is the best on the home invoker
- * and degrades the more steps you make. The hashing makes sure that all loadbalancers in a cluster will always pick the
- * same home invoker and do the same progression for a given action.
- *
- * Known caveats:
- * - This assumption is not always true. For instance, two heavy workloads landing on the same invoker can override each
- *   other, which results in many cold starts due to all containers being evicted by the invoker to make space for the
- *   "other" workload respectively. Future work could be to keep a buffer of invokers last scheduled for each action and
- *   to prefer to pick that one. Then the second-last one and so forth.
- *
- * ## Capacity checking
- *
- * The maximum capacity per invoker is configured using `user-memory`, which is the maximum amount of memory of actions
- * running in parallel on that invoker.
- *
- * Spare capacity is determined by what the loadbalancer thinks it scheduled to each invoker. Upon scheduling, an entry
- * is made to update the books and a slot for each MB of the actions memory limit in a Semaphore is taken. These slots
- * are only released after the response from the invoker (active-ack) arrives **or** after the active-ack times out.
- * The Semaphore has as many slots as MBs are configured in `user-memory`.
- *
- * Known caveats:
- * - In an overload scenario, activations are queued directly to the invokers, which makes the active-ack timeout
- *   unpredictable. Timing out active-acks in that case can cause the loadbalancer to prematurely assign new load to an
- *   overloaded invoker, which can cause uneven queues.
- * - The same is true if an invoker is extraordinarily slow in processing activations. The queue on this invoker will
- *   slowly rise if it gets slow to the point of still sending pings, but handling the load so slowly, that the
- *   active-acks time out. The loadbalancer again will think there is capacity, when there is none.
- *
- * Both caveats could be solved in future work by not queueing to invoker topics on overload, but to queue on a
- * centralized overflow topic. Timing out an active-ack can then be seen as a system-error, as described in the
- * following.
- *
- * ## Invoker health checking
- *
- * Invoker health is determined via a kafka-based protocol, where each invoker pings the loadbalancer every second. If
- * no ping is seen for a defined amount of time, the invoker is considered "Offline".
- *
- * Moreover, results from all activations are inspected. If more than 3 out of the last 10 activations contained system
- * errors, the invoker is considered "Unhealthy". If an invoker is unhealty, no user workload is sent to it, but
- * test-actions are sent by the loadbalancer to check if system errors are still happening. If the
- * system-error-threshold-count in the last 10 activations falls below 3, the invoker is considered "Healthy" again.
- *
- * To summarize:
- * - "Offline": Ping missing for > 10 seconds
- * - "Unhealthy": > 3 **system-errors** in the last 10 activations, pings arriving as usual
- * - "Healthy": < 3 **system-errors** in the last 10 activations, pings arriving as usual
- *
- * ## Horizontal sharding
- *
- * Sharding is employed to avoid both loadbalancers having to share any data, because the metrics used in scheduling
- * are very fast changing.
- *
- * Horizontal sharding means, that each invoker's capacity is evenly divided between the loadbalancers. If an invoker
- * has at most 16 slots available (invoker-busy-threshold = 16), those will be divided to 8 slots for each loadbalancer
- * (if there are 2).
- *
- * If concurrent activation processing is enabled (and concurrency limit is > 1), accounting of containers and
- * concurrency capacity per container will limit the number of concurrent activations routed to the particular
- * slot at an invoker. Default max concurrency is 1.
- *
- * Known caveats:
- * - If a loadbalancer leaves or joins the cluster, all state is removed and created from scratch. Those events should
- *   not happen often.
- * - If concurrent activation processing is enabled, it only accounts for the containers that the current loadbalancer knows.
- *   So the actual number of containers launched at the invoker may be less than is counted at the loadbalancer, since
- *   the invoker may skip container launch in case there is concurrent capacity available for a container launched via
- *   some other loadbalancer.
- */
-
 // avs --begin
 //class AdaptiveInvokerPoolMaintenance(var activeInvokers: IndexedSeq[InvokerHealth],var inactiveInvokers: IndexedSeq[InvokerHealth]){
 class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealth],var inactiveInvokers: ListBuffer[InvokerHealth],logging: Logging){
@@ -157,12 +56,12 @@ class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealt
   }
 
   // used to push an invoker, if available, to go to active state from inactive state.
-  def upgradeInvoker(): Option[InvokerInstanceId] = {
+  def upgradeInvoker(): Option[InvokerHealth] = {
     logging.info(this,s"<avs_debug> <AIPM> <upgradeInvoker> inactiveInvokers.size: ${inactiveInvokers.size} ")
     if(inactiveInvokers.size > 0){
       logging.info(this,s"<avs_debug> <AIPM> <upgradeInvoker> YAAAy! Will get an invoker")
       var toYieldInvoker: InvokerHealth = inactiveInvokers.remove(0)
-      return Some(toYieldInvoker.id)
+      return Some(toYieldInvoker)
     } else{
       logging.info(this,s"<avs_debug> <AIPM> <upgradeInvoker> No inactive-invokers present! Should use random assignment..")
       return None
@@ -170,13 +69,17 @@ class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealt
   }
 
   // used to push an invoker, if available, to go from in-active state to active state.
-
   def downgradeInvoker(toDowngradeInvoker: ListBuffer[InvokerHealth]): Unit = {
+    logging.info(this,s"<avs_debug> <AIPM> <downgradeInvoker> begin activeInvokers.size: ${activeInvokers.size} inactiveInvokers.size: ${inactiveInvokers.size}")
     toDowngradeInvoker.foreach{
       curInvoker =>
       activeInvokers-=curInvoker // might crash if there is a race condition!
-      inactiveInvokers+=curInvoker // this is OK..
+      if(!(inactiveInvokers.exists( invoker => invoker == curInvoker))){
+        logging.info(this,s"<avs_debug> <AIPM> <downgradeInvoker> apparently curInvoker: ${curInvoker.id.toInt} is not present in inactiveInvokers!")    
+        inactiveInvokers+=curInvoker // this is OK..
+      }
     }
+    logging.info(this,s"<avs_debug> <AIPM> <downgradeInvoker> end activeInvokers.size: ${activeInvokers.size} inactiveInvokers.size: ${inactiveInvokers.size}")
   }
 
   def printSize(): Unit = {
@@ -301,16 +204,6 @@ class AdaptiveContainerPoolBalancer(
   override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = Future.successful(schedulingState.invokers)
   override def clusterSize: Int = schedulingState.clusterSize
 
-  /*var activeInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
-  var inactiveInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
-  // Assuming that managedInvokers and blackboxInvokers are same, so copying them for now.. 
-  schedulingState.managedInvokers.foreach {
-    curInvoker =>
-    activeInvokersBuffer += curInvoker // TODO-Testing: Check whether the code works without having any active Invokers, to begin with.
-    inactiveInvokersBuffer += curInvoker
-  }
-  var curInvokerPoolMaintenance = new AdaptiveInvokerPoolMaintenance(activeInvokersBuffer,inactiveInvokersBuffer,logging)
-  */
   /** 1. Publish a message to the loadbalancer */
 
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
@@ -321,20 +214,6 @@ class AdaptiveContainerPoolBalancer(
     val (invokersToUse, stepSizes) =
       if (!isBlackboxInvocation) (schedulingState.managedInvokers, schedulingState.managedStepSizes)
       else (schedulingState.blackboxInvokers, schedulingState.blackboxStepSizes)
-
-    // avs --begin
-    // TODO: Should change this to a sensible logic
-    // TODO: Instead of managed/blackbox invoker, should send active and inactive invokers.. 
-    /*var activeInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
-    var inactiveInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
-    invokersToUse.foreach {
-      curInvoker =>
-      activeInvokersBuffer += curInvoker
-      inactiveInvokersBuffer += curInvoker
-    }
-    var curInvokerPoolMaintenance = new AdaptiveInvokerPoolMaintenance(activeInvokersBuffer,inactiveInvokersBuffer,logging)
-    */
-    // avs --end
 
     val chosen = if (invokersToUse.nonEmpty) {
       val hash = AdaptiveContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
@@ -374,29 +253,29 @@ class AdaptiveContainerPoolBalancer(
 
 // avs --begin
     var curInstant: Long = Instant.now.toEpochMilli
-    if( (curInstant -lastUpdatedTime ) > scanIntervalInMS){
+    if( (curInstant-lastUpdatedTime ) > scanIntervalInMS){
         lastUpdatedTime = curInstant
         logging.info(this,s"<avs_debug> <AdaptiveContainerPoolBalancer> <publish> Calling schedule for activation ${msg.activationId} for '${msg.action.asString}' ($actionType) ") // avs
         
         // Should do this organically too, but how? Maybe, if am chekcing all the invokers, should update the flag..
         //if(needToUpgradeInvoker(activeInvokersBuffer)){
-        if(nTUI(schedulingState.activeInvokersBuffer)){
+        if(nTUI(schedulingState.curInvokerPoolMaintenance.activeInvokers)){
           schedulingState.curInvokerPoolMaintenance.upgradeInvoker()
         }else{
           //var invokersToDowngrade: ListBuffer[InvokerHealth] = needToDowngradeInvoker(activeInvokers)
-          schedulingState.curInvokerPoolMaintenance.downgradeInvoker(needToDowngradeInvoker(schedulingState.activeInvokersBuffer))
+          schedulingState.curInvokerPoolMaintenance.downgradeInvoker(needToDowngradeInvoker(schedulingState.curInvokerPoolMaintenance.activeInvokers))
         }
         
-      }else if(schedulingState.curInvokerPoolMaintenance.shouldUpgradeInvoker){
-        schedulingState.curInvokerPoolMaintenance.upgradeInvoker()
-      }
+    }else if(schedulingState.curInvokerPoolMaintenance.shouldUpgradeInvoker){
+      schedulingState.curInvokerPoolMaintenance.upgradeInvoker()
+    }
 // avs --end
     chosen
       .map { invoker =>
         prevInvokerUsed = invoker.toInt //avs
         logging.info(
           this,
-          s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to $invoker and prevInvokerUsed: ${prevInvokerUsed}")        
+          s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to (schedule) $invoker and prevInvokerUsed: ${prevInvokerUsed}")        
         val activationResult = setupActivation(msg, action, invoker)
         sendActivationToInvoker(messageProducer, msg, invoker).map(_ => activationResult)
 
@@ -496,6 +375,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
    * @return an invoker to schedule to or None of no invoker is available
    */
 
+// avs --begin
   //@tailrec
     def schedule(
       maxConcurrent: Int,
@@ -536,13 +416,12 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
               return Some (chosenNewInvoker,true)
             case None =>
               logging.info(this,s"<avs_debug> <schedule> 1.21, DID-NOT get an invoker from getActiveInvoker ") // avs
-              val newActiveInvoker: Option[InvokerInstanceId] = curInvokerPoolMaintenance.upgradeInvoker() //actionName,activeInvokers) 
+              val newActiveInvoker: Option[InvokerHealth] = curInvokerPoolMaintenance.upgradeInvoker() //actionName,activeInvokers) 
               newActiveInvoker match{ 
                 case Some (newChosenActiveInvoker) => 
-                  logging.info(this,s"<avs_debug> <schedule> 1.3, got an invoker: ${newChosenActiveInvoker.toInt} from upgradeInvoker!! ") // avs
-                  val newChosenInvokerHealth = activeInvokers(newChosenActiveInvoker.toInt)
-                  if(checkInvokerCapacity(newChosenInvokerHealth,actionName)){
-                    return Some(newChosenActiveInvoker,true)
+                  logging.info(this,s"<avs_debug> <schedule> 1.3, got an invoker: ${newChosenActiveInvoker.id.toInt} from upgradeInvoker!! ") // avs
+                  if(checkInvokerCapacity(newChosenActiveInvoker,actionName)){
+                    return Some(newChosenActiveInvoker.id,true)
                   }
                 case None =>
                   logging.info(this,s"<avs_debug> <schedule> 1.31, DID-NOT get an invoker from upgradeInvoker!! ") // avs
@@ -568,6 +447,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
     
   }
 }
+// avs --end
 
 /**
  * Holds the state necessary for scheduling of actions.
@@ -618,6 +498,8 @@ case class AdaptiveContainerPoolBalancerState(
 
   def curInvokerPoolMaintenance: AdaptiveInvokerPoolMaintenance = _curInvokerPoolMaintenance
   def activeInvokersBuffer: ListBuffer[InvokerHealth] = _activeInvokersBuffer 
+
+  var aipmInit: Boolean = false
 // avs --end
   /**
    * @param memory
@@ -691,17 +573,20 @@ case class AdaptiveContainerPoolBalancerState(
       TransactionId.loadbalancer)
 
 // avs --begin
-    logging.info(this,s"<avs_debug>, now populating, curInvokerPoolMaintenance object! ")
-    _invokers.foreach {
-      curInvoker =>
-      _activeInvokersBuffer += curInvoker // TODO-Testing: Check whether the code works without having any active Invokers, to begin with.
-      _inactiveInvokersBuffer += curInvoker
-    }    
-    
-    _curInvokerPoolMaintenance.activeInvokers = _activeInvokersBuffer
-    _curInvokerPoolMaintenance.inactiveInvokers = _inactiveInvokersBuffer
-    _curInvokerPoolMaintenance.printSize()
-    logging.info(this,s"<avs_debug>, DONE populating, curInvokerPoolMaintenance object! ")
+    if(!aipmInit){
+      logging.info(this,s"<avs_debug>, now populating, curInvokerPoolMaintenance object! ")
+      _invokers.foreach {
+        curInvoker =>
+        _activeInvokersBuffer += curInvoker // TODO-Testing: Check whether the code works without having any active Invokers, to begin with.
+        _inactiveInvokersBuffer += curInvoker
+      }    
+      
+      _curInvokerPoolMaintenance.activeInvokers = _activeInvokersBuffer
+      _curInvokerPoolMaintenance.inactiveInvokers = _inactiveInvokersBuffer
+      _curInvokerPoolMaintenance.printSize()
+      logging.info(this,s"<avs_debug>, DONE populating, curInvokerPoolMaintenance object! ")
+      aipmInit = true      
+    }
 // avs --end       
   }
 
@@ -740,21 +625,4 @@ case class AdaptiveContainerPoolBalancerState(
  */
 case class AdaptiveContainerPoolBalancerConfig(managedFraction: Double, blackboxFraction: Double, timeoutFactor: Int)
 
-/**
- * State kept for each activation slot until completion.
- *
- * @param id id of the activation
- * @param namespaceId namespace that invoked the action
- * @param invokerName invoker the action is scheduled to
- * @param timeoutHandler times out completion of this activation, should be canceled on good paths
- */
-/*case class ActivationEntry(id: ActivationId,
-                           namespaceId: UUID,
-                           invokerName: InvokerInstanceId,
-                           memory: ByteSize,
-                           maxConcurrent: Int,
-                           fullyQualifiedEntityName: FullyQualifiedEntityName,
-                           timeoutHandler: Cancellable,
-                           isBlackbox: Boolean)
-*/
 // avs --end

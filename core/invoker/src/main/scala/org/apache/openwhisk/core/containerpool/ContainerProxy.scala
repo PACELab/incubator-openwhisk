@@ -236,6 +236,7 @@ class ContainerProxy(
   var numActivationsServed = 0;
   var prevActivationTime : Long = 0;
   var prevActivationInitTime : Long =0;
+  var prevActivationWaitTime: Long = 0;
   var prevActivationControllerID: ControllerInstanceId = new ControllerInstanceId(s"0");
   // avs --end
   //keep a separate count to avoid confusion with ContainerState.activeActivationCount that is tracked/modified only in ContainerPool
@@ -371,6 +372,7 @@ class ContainerProxy(
       context.parent ! UpdateStats(data.action.name.asString,prevActivationInitTime,prevActivationControllerID,prevActivationTime) //avs 
       prevActivationTime = 0;//avs
       prevActivationInitTime = 0// avs
+      prevActivationWaitTime = 0 //avs
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay
       if (requestWork(data) || activeCount > 0) {
         stay using data
@@ -668,9 +670,12 @@ class ContainerProxy(
 
           // avs --start
           numActivationsServed = numActivationsServed+1; //avs
-          prevActivationTime = activation.duration getOrElse 0;
+          
           prevActivationControllerID = job.msg.rootControllerIndex
-          prevActivationInitTime = activation.annotations.getAs[Long](WhiskActivation.initTimeAnnotation).getOrElse(0) //activation.initTimeAnnotation getOrElse -1
+          prevActivationInitTime = activation.annotations.getAs[Long](WhiskActivation.initTimeAnnotation).getOrElse(0)
+          prevActivationWaitTime = activation.annotations.getAs[Long](WhiskActivation.waitTimeAnnotation).getOrElse(0)
+          prevActivationTime = activation.duration getOrElse 0;
+          prevActivationTime = prevActivationTime + prevActivationInitTime + prevActivationWaitTime
           //logging.info(this, s"<avs_debug> <ContainerProxy> <finish_1> activationResult.start: ${activation.start} and duration: ${activation.duration};just start: ${start} numActivationsServed: ${numActivationsServed} prevActivationInitTime: ${prevActivationInitTime} "); //avs 
           // WARNING: not sure whether this could break it, if there are some errors. 
           // avs --end
