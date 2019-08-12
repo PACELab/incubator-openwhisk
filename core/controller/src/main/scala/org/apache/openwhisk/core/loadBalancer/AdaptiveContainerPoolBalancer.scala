@@ -149,7 +149,7 @@ import java.time.Instant // avs
 // avs --begin
 //class AdaptiveInvokerPoolMaintenance(var activeInvokers: IndexedSeq[InvokerHealth],var inactiveInvokers: IndexedSeq[InvokerHealth]){
 class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealth],var inactiveInvokers: ListBuffer[InvokerHealth],logging: Logging){
-  var curActiveInvoker: InvokerHealth =  activeInvokers(0); 
+  //var curActiveInvoker: InvokerHealth =  activeInvokers(0); 
   var shouldUpgradeInvoker: Boolean = false
 
   def checkInvokersState(): Unit = {
@@ -167,7 +167,6 @@ class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealt
       logging.info(this,s"<avs_debug> <AIPM> <upgradeInvoker> No inactive-invokers present! Should use random assignment..")
       return None
     }   
-    //Some(curActiveInvoker.id)
   }
 
   // used to push an invoker, if available, to go from in-active state to active state.
@@ -180,6 +179,10 @@ class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealt
     }
   }
 
+  def printSize(): Unit = {
+    logging.info(this,s"<avs_debug> <AIPM> <printSize> activeInvokers.size: ${activeInvokers.size} ")
+    logging.info(this,s"<avs_debug> <AIPM> <printSize> inactiveInvokers.size: ${inactiveInvokers.size} ")
+  }
 
 }
 // avs --end
@@ -307,9 +310,9 @@ class AdaptiveContainerPoolBalancer(
     inactiveInvokersBuffer += curInvoker
   }
   var curInvokerPoolMaintenance = new AdaptiveInvokerPoolMaintenance(activeInvokersBuffer,inactiveInvokersBuffer,logging)
-  curInvokerPoolMaintenance.curActiveInvoker = schedulingState.managedInvokers(0) //if(invokersToUse.size>0)invokersToUse(0) else None
   */
   /** 1. Publish a message to the loadbalancer */
+
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
     implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
 
@@ -319,11 +322,10 @@ class AdaptiveContainerPoolBalancer(
       if (!isBlackboxInvocation) (schedulingState.managedInvokers, schedulingState.managedStepSizes)
       else (schedulingState.blackboxInvokers, schedulingState.blackboxStepSizes)
 
-    
     // avs --begin
     // TODO: Should change this to a sensible logic
     // TODO: Instead of managed/blackbox invoker, should send active and inactive invokers.. 
-    var activeInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
+    /*var activeInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
     var inactiveInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
     invokersToUse.foreach {
       curInvoker =>
@@ -331,9 +333,8 @@ class AdaptiveContainerPoolBalancer(
       inactiveInvokersBuffer += curInvoker
     }
     var curInvokerPoolMaintenance = new AdaptiveInvokerPoolMaintenance(activeInvokersBuffer,inactiveInvokersBuffer,logging)
-    curInvokerPoolMaintenance.curActiveInvoker = invokersToUse(0) //if(invokersToUse.size>0)invokersToUse(0) else None
+    */
     // avs --end
-
 
     val chosen = if (invokersToUse.nonEmpty) {
       val hash = AdaptiveContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
@@ -352,7 +353,7 @@ class AdaptiveContainerPoolBalancer(
         schedulingState.invokerSlots,
         action.limits.memory.megabytes,
         //homeInvoker,stepSize, // avs 
-        curInvokerPoolMaintenance, //avs
+        schedulingState.curInvokerPoolMaintenance, //avs
         action.name.asString,
         cIC, gUIFA, gaI,nTUI)
 
@@ -379,18 +380,17 @@ class AdaptiveContainerPoolBalancer(
         
         // Should do this organically too, but how? Maybe, if am chekcing all the invokers, should update the flag..
         //if(needToUpgradeInvoker(activeInvokersBuffer)){
-        if(nTUI(activeInvokersBuffer)){
-          curInvokerPoolMaintenance.upgradeInvoker()
+        if(nTUI(schedulingState.activeInvokersBuffer)){
+          schedulingState.curInvokerPoolMaintenance.upgradeInvoker()
         }else{
           //var invokersToDowngrade: ListBuffer[InvokerHealth] = needToDowngradeInvoker(activeInvokers)
-          curInvokerPoolMaintenance.downgradeInvoker(needToDowngradeInvoker(activeInvokersBuffer))
+          schedulingState.curInvokerPoolMaintenance.downgradeInvoker(needToDowngradeInvoker(schedulingState.activeInvokersBuffer))
         }
         
-      }else if(curInvokerPoolMaintenance.shouldUpgradeInvoker){
-        curInvokerPoolMaintenance.upgradeInvoker()
+      }else if(schedulingState.curInvokerPoolMaintenance.shouldUpgradeInvoker){
+        schedulingState.curInvokerPoolMaintenance.upgradeInvoker()
       }
 // avs --end
-
     chosen
       .map { invoker =>
         prevInvokerUsed = invoker.toInt //avs
@@ -519,14 +519,14 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
       //var chosenInvoker = getExistingContainer(actionName)
 
       logging.info(this,s"<avs_debug> <schedule> 0.0 ") // avs
-      val invoker: Option[InvokerInstanceId] = getUsedInvokerForAction(actionName) //curInvokerPoolMaintenance.getExistingContainer(actionName) //,curActiveInvoker)
+      val invoker: Option[InvokerInstanceId] = getUsedInvokerForAction(actionName) //curInvokerPoolMaintenance.getExistingContainer(actionName)
       invoker match {
         case Some(chosenInvoker) =>
           logging.info(this,s"<avs_debug> <schedule> 1.0, got an invoker from getUsedInvokerForAction ") // avs
           return Some(chosenInvoker,true) //,true)
         case None =>
           logging.info(this,s"<avs_debug> <schedule> 1.1, Did-NOT get an invoker from getUsedInvokerForAction ") // avs
-          val newInvokerForAction: Option[InvokerInstanceId] = getActiveInvoker(actionName,activeInvokers) //curInvokerPoolMaintenance.getExistingInvoker(actionName,curActiveInvoker,activeInvokers) 
+          val newInvokerForAction: Option[InvokerInstanceId] = getActiveInvoker(actionName,activeInvokers) //curInvokerPoolMaintenance.getExistingInvoker(actionName,activeInvokers) 
           newInvokerForAction match{ 
             case Some(chosenNewInvoker) =>  
               logging.info(this,s"<avs_debug> <schedule> 1.2, got an invoker from getActiveInvoker ") // avs
@@ -536,7 +536,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
               return Some (chosenNewInvoker,true)
             case None =>
               logging.info(this,s"<avs_debug> <schedule> 1.21, DID-NOT get an invoker from getActiveInvoker ") // avs
-              val newActiveInvoker: Option[InvokerInstanceId] = curInvokerPoolMaintenance.upgradeInvoker() //actionName,curActiveInvoker,activeInvokers) 
+              val newActiveInvoker: Option[InvokerInstanceId] = curInvokerPoolMaintenance.upgradeInvoker() //actionName,activeInvokers) 
               newActiveInvoker match{ 
                 case Some (newChosenActiveInvoker) => 
                   logging.info(this,s"<avs_debug> <schedule> 1.3, got an invoker: ${newChosenActiveInvoker.toInt} from upgradeInvoker!! ") // avs
@@ -611,6 +611,14 @@ case class AdaptiveContainerPoolBalancerState(
   def invokerSlots: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]] = _invokerSlots
   def clusterSize: Int = _clusterSize
 
+// avs --begin
+  var _activeInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
+  var _inactiveInvokersBuffer: ListBuffer[InvokerHealth]  = new mutable.ListBuffer[InvokerHealth]
+  var _curInvokerPoolMaintenance = new AdaptiveInvokerPoolMaintenance(_activeInvokersBuffer,_inactiveInvokersBuffer,logging)
+
+  def curInvokerPoolMaintenance: AdaptiveInvokerPoolMaintenance = _curInvokerPoolMaintenance
+  def activeInvokersBuffer: ListBuffer[InvokerHealth] = _activeInvokersBuffer 
+// avs --end
   /**
    * @param memory
    * @return calculated invoker slot
@@ -681,6 +689,20 @@ case class AdaptiveContainerPoolBalancerState(
       this,
       s"loadbalancer invoker status updated. managedInvokers = $managed blackboxInvokers = $blackboxes")(
       TransactionId.loadbalancer)
+
+// avs --begin
+    logging.info(this,s"<avs_debug>, now populating, curInvokerPoolMaintenance object! ")
+    _invokers.foreach {
+      curInvoker =>
+      _activeInvokersBuffer += curInvoker // TODO-Testing: Check whether the code works without having any active Invokers, to begin with.
+      _inactiveInvokersBuffer += curInvoker
+    }    
+    
+    _curInvokerPoolMaintenance.activeInvokers = _activeInvokersBuffer
+    _curInvokerPoolMaintenance.inactiveInvokers = _inactiveInvokersBuffer
+    _curInvokerPoolMaintenance.printSize()
+    logging.info(this,s"<avs_debug>, DONE populating, curInvokerPoolMaintenance object! ")
+// avs --end       
   }
 
   /**
