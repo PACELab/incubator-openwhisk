@@ -72,7 +72,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   var allInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
 
   var lastUpdatedTime: Long = 0
-  var scanIntervalInMS: Long = 10*1000 // 10 seconds!
+  var scanIntervalInMS: Long = 60*1000 // 10 seconds!
   // i.e. if  I have more than (acceptableUnsafeInvokerRatio*100)% invokers which are unsafe in either of the workload types, I will upgrade an invoker..
   var acceptableUnsafeInvokerRatio = 0.75 
   // avs --end
@@ -247,13 +247,13 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
             allInvokers.get(curInvoker.id) match {
               case Some(curInvokerStats) =>
                 logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is PRESENT in allInvokers. Before checking this invoker, numUnsafeInvokers: ${numUnsafeInvokers} ")
-                someWorkloadUnsafe = curInvokerStats.checkInvokerStatus()
+                someWorkloadUnsafe = curInvokerStats.isInvokerUnsafe()
               case None =>
                 allInvokers = allInvokers + (curInvoker.id -> new AdapativeInvokerStats(curInvoker.id,curInvoker.status,logging) )
                 logging.info(this,s"<avs_debug> in <needToUpgradeInvoker> invoker: ${curInvoker.id.toInt} is ABSENT in allInvokers. Before checking this invoker, numUnsafeInvokers: ${numUnsafeInvokers}. This shouldn't happen, HANDLE it!!")
                 var tempInvokerStats = allInvokers(curInvoker.id)
                 tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
-                someWorkloadUnsafe = tempInvokerStats.checkInvokerStatus()
+                someWorkloadUnsafe = tempInvokerStats.isInvokerUnsafe()
               }          
             if(someWorkloadUnsafe)
               numUnsafeInvokers+=1

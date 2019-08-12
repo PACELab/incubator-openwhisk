@@ -30,6 +30,7 @@ import scala.collection.mutable //avs
 import scala.collection.immutable //avs
 import scala.collection.mutable.ListBuffer //avs
 import java.time.Instant // avs
+//import util.control.Breaks._ // avs
 // avs --begin
 
 class functionInfo {
@@ -179,35 +180,55 @@ class ActionStats(val actionName:String,logging: Logging){
         var tempInvokerStats:AdapativeInvokerStats  = usedInvokers(invoker)
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
         tempInvokerStats.updateActionStats(actionName,movingAvgLatency,toUpdateNumConts)
-
     }
   } 
 
   //curActStats.getUsedInvoker(actionName) 
   def getUsedInvoker(): Option[InvokerInstanceId] = {
+    var lastCheckedIdx = -1
+    var curIdx = -1
+    var breakCondtn: Boolean = false
+
     usedInvokers.keys.foreach{
       curInvoker => 
-      var curInvokerStats:AdapativeInvokerStats  = usedInvokers(curInvoker)
-      logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
-      // If I fit, I will choose this.
-      // TODO: Change this so that I iterate based on some "ranking"
-      if(curInvokerStats.capacityRemaining(actionName))
-        Some(curInvoker)
+      curIdx+=1 
+      usedInvokers.get(curInvoker) match {
+        case Some(curInvokerStats) => 
+          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
+          // If I fit, I will choose this.
+          // TODO: Change this so that I iterate based on some "ranking"
+          if(curInvokerStats.capacityRemaining(actionName)){
+            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding??")  
+            breakCondtn = true
+            lastCheckedIdx = curIdx
+            return Some(curInvoker)
+          }
+        case None =>
+          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
+      }
+
     }
-    // if it has come here, then I don't have anything..     
+
     logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get a used invoker :( :( ")
     None
+
   } 
 
   def getActiveInvoker(activeInvokers: ListBuffer[InvokerHealth]): Option[InvokerInstanceId] = {
     activeInvokers.foreach{
       curInvoker => 
-      var curInvokerStats:AdapativeInvokerStats  = usedInvokers(curInvoker.id)
-      logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName}, invoker: ${curInvoker.id.toInt} checking whether it has any capacityRemaining...")
-      // If I fit, I will choose this.
-      // TODO: Change this so that I iterate based on some "ranking"
-      if(curInvokerStats.capacityRemaining(actionName))
-        Some(curInvoker.id)
+      usedInvokers.get(curInvoker.id) match {
+        case Some(curInvokerStats) => 
+          logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName}, invoker: ${curInvoker.id.toInt} checking whether it has any capacityRemaining...")
+          // If I fit, I will choose this.
+          // TODO: Change this so that I iterate based on some "ranking"
+          if(curInvokerStats.capacityRemaining(actionName)){
+            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.id.toInt} supposedly has capacity, am I yielding??")  
+            return Some(curInvoker.id)
+          }
+        case None =>
+          logging.info(this,s"\t <avs_debug> <getActiveInvoker> Invoker: ${curInvoker.id.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
+      }
     }
     // if it has come here, then I don't have anything..     
     logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get an active invoker :( :( ")
@@ -342,7 +363,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     }
   }
 
-  def checkInvokerStatus(): Boolean = {
+  def isInvokerUnsafe(): Boolean = {
     var retVal: Boolean = false
     updateActTypeStats()
     if(actionTypeOpZone("ET")==opZoneUnSafe){
