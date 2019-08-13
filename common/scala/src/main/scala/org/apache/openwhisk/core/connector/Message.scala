@@ -102,12 +102,13 @@ object Metric extends DefaultJsonProtocol {
 */  
 
 case class ActionStatsMessage(curActName: String,
-                              avgLatency: Long,
+                              latency: Long,
+                              initTime: Long,
                               numConts: Int,
                               invoker: InvokerInstanceId,
                             ) extends Message{
   override def toString = {
-    s"action: ${curActName} numConts: ${numConts} avgLatency: ${avgLatency}"
+    s"action: ${curActName} numConts: ${numConts} latency: ${latency} initTime: ${initTime}"
   }  
   def toJson = ActionStatsMessage.serdes.write(this).asJsObject
   override def serialize = toJson.compactPrint
@@ -116,7 +117,7 @@ case class ActionStatsMessage(curActName: String,
 object ActionStatsMessage extends DefaultJsonProtocol {
   def parse(msg: String): Try[ActionStatsMessage] = Try(serdes.read(msg.parseJson))
   //implicit val serdes = jsonFormat3(ActionStatsMessage.apply)
-  implicit val serdes = jsonFormat(ActionStatsMessage.apply _, "curActName","avgLatency","numConts","invoker")
+  implicit val serdes = jsonFormat(ActionStatsMessage.apply _, "curActName","latency","initTime","numConts","invoker")
 }
 
 // avs --end

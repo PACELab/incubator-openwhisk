@@ -409,7 +409,7 @@ object AdaptiveContainerPoolBalancer extends LoadBalancerProvider {
           val newInvokerForAction: Option[InvokerInstanceId] = getActiveInvoker(actionName,activeInvokers) //curInvokerPoolMaintenance.getExistingInvoker(actionName,activeInvokers) 
           newInvokerForAction match{ 
             case Some(chosenNewInvoker) =>  
-              logging.info(this,s"<avs_debug> <schedule> 1.2, got an invoker from getActiveInvoker ") // avs
+              logging.info(this,s"<avs_debug> <schedule> 1.2, got an invoker from getActiveInvoker, which is of size: ${activeInvokers.size} ") // avs
               if(needToUpgradeInvoker(activeInvokers)){
                 curInvokerPoolMaintenance.shouldUpgradeInvoker = true
               }

@@ -57,7 +57,8 @@ object InvokerReactive extends InvokerProvider {
    * @param Boolean is true this is resource free message and false if this is a result forwarding message
    */
   type ActiveAck = (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID, Boolean) => Future[Any]
-  type ActiveLoadResp = (toRelayActionStats,String) => Future[Any]
+  //type ActiveLoadResp = (toRelayActionStats,String) => Future[Any]
+  type ActiveLoadResp = (String,Long,Long,Int,String) => Future[Any]
   override def instance(
     config: WhiskConfig,
     instance: InvokerInstanceId,
@@ -192,15 +193,16 @@ class InvokerReactive(
   }
 
 // avs --begin
-  private val relayActionStats: InvokerReactive.ActiveLoadResp = (curActStats: toRelayActionStats,controllerIDStr: String) => {
-    var printMsg = s"<avs_debug> <processLoadMessage> actName: ${curActStats.actionName}, avgLat: ${curActStats.avgLatency} numConts: ${curActStats.numConts}"
+  //private val relayActionStats: InvokerReactive.ActiveLoadResp = (curActStats: toRelayActionStats,controllerIDStr: String) => {
+  private val relayActionStats: InvokerReactive.ActiveLoadResp = (actionName: String,latency: Long,initTime:Long ,numConts: Int,controllerIDStr: String) => {    
+    var printMsg = s"<avs_debug> <processLoadMessage> actName: ${actionName}, avgLat: ${latency} numConts: ${numConts} initTime: ${initTime}"
     logging.info(this, printMsg)
-    val msg: ActionStatsMessage = ActionStatsMessage(curActStats.actionName,curActStats.avgLatency,curActStats.numConts,instance)
+    val msg: ActionStatsMessage = ActionStatsMessage(actionName,latency,initTime,numConts,instance)
     producer.send(topic = "load-completed" + controllerIDStr, msg).andThen {
         case Success(_) =>
-          logging.info(this,s" <avs_debug> <Success-1> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg.toString} ")
+          logging.info(this,s" <avs_debug> <Success-1> posted resp to loadRequest for aciton: ${actionName} msg.toStr: ${msg.toString} ")
         case Failure(_) =>
-          logging.info(this,s" <avs_debug> <Failure-1> posted resp to loadRequest for aciton: ${curActStats.actionName} msg.toStr: ${msg.toString} ")
+          logging.info(this,s" <avs_debug> <Failure-1> posted resp to loadRequest for aciton: ${actionName} msg.toStr: ${msg.toString} ")
     }       
   }
 // avs --end 

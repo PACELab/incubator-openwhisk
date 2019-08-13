@@ -100,14 +100,19 @@ class functionInfo {
   var opZoneUnSafe = 2
 
   var statsTimeoutInMilli: Long = 60*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
+  var resetNumInstances = 2 
+  var minResetTimeInMilli = 5*1000
 // avs --end  
 }
 
 // the stats of an action in a given invoker
 class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging: Logging) extends functionInfo{
   val standaloneRuntime: Long = getFunctionRuntime(actionName)
+  val statsResetTimeout: Long = if( (resetNumInstances * standaloneRuntime) > minResetTimeInMilli) resetNumInstances * standaloneRuntime else minResetTimeInMilli
   var numConts = 0
   var movingAvgLatency: Long = 0 
+  var cumulSum: Long = 0
+  var runningCount: Long = 0
   var actionType: String  = "MP" // ET or MessagingProvider
   var opZone = 0 // 0: safe ( 0 to 50% of latency); 1: will reach un-safe soon, 2: unsafe
   var lastUpdated: Long = Instant.now.toEpochMilli // TODO: should be time, will update TYPE later.
@@ -138,12 +143,30 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
   }
 
   def resetStats(curTime: Long): Unit = {
-    logging.info(this,s"\t <avs_debug> <ASPI> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats since: curTime: ${curTime} is larger than lastUpdated: ${lastUpdated} by ${statsTimeoutInMilli} ") 
+    // Assuming that, if either it is not updated in the past, 
+    // a. statsTimeoutInMilli : Atleast a container would have died.
+    // b. statsResetTimeout: It would have passed some time, so, the load should have subsided..
+
+    logging.info(this,s"\t <avs_debug> <ASPI> <resetStats> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats since: curTime: ${curTime} is larger than lastUpdated: ${lastUpdated} by ${statsTimeoutInMilli} or ${statsResetTimeout} ") 
     opZone = 0 
     movingAvgLatency = 0
     numConts = 0
+    cumulSum = 0
+    runningCount = 0
     lastUpdated = Instant.now.toEpochMilli
     // EXPT-WARNING: Might be better to issue a load request and refresh stats!, instead of resetting willy nilly!
+  }
+
+  // update(latencyVal,initTime,toUpdateNumConts)
+  def update(latency: Long, initTime: Long, toUpdateNumConts: Int): Unit = {
+    if(initTime==0){ // warm starts only!!
+      cumulSum+= latency  
+      runningCount+= 1
+    }
+    numConts = toUpdateNumConts
+    movingAvgLatency = if(runningCount>0) (cumulSum/runningCount) else 0
+    lastUpdated = Instant.now.toEpochMilli
+    logging.info(this,s"\t <avs_debug> <ASPI> <update> In update of Action: ${actionName}, myInvokerID: ${myInvokerID} cumulSum: ${cumulSum} runningCount: ${runningCount} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} ")     
   }
 
 }
@@ -153,20 +176,20 @@ class ActionStats(val actionName:String,logging: Logging){
   var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
   var lastInstantUsed = mutable.Map.empty[InvokerInstanceId, Long]
 
-  def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,movingAvgLatency: Long, toUpdateNumConts: Int){
+  def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,latencyVal: Long,initTime: Long, toUpdateNumConts: Int){
     var curInstant: Long = Instant.now.toEpochMilli
     usedInvokers.get(invoker) match{
       case Some(curInvokerStats) =>
-        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency}")
-        // updateActionStats(toUpdateAction:String, movingAvgLatency: Long, toUpdateNumConts:Int):Unit = {
-        curInvokerStats.updateActionStats(actionName,movingAvgLatency,toUpdateNumConts)
+        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} initTime: ${initTime}")
+        // updateActionStats(toUpdateAction:String, latencyVal: Long, toUpdateNumConts:Int):Unit = {
+        curInvokerStats.updateActionStats(actionName,latencyVal,initTime,toUpdateNumConts)
         //lastInstantUsed(invoker) = curInstant // should be ok, but will only update when it is allocated..
       case None =>
         usedInvokers = usedInvokers + (invoker -> invokerStats)
         lastInstantUsed = lastInstantUsed + (invoker -> curInstant)
         var tempInvokerStats:AdapativeInvokerStats  = usedInvokers(invoker)
-        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${movingAvgLatency} at instant: ${curInstant}")
-        tempInvokerStats.updateActionStats(actionName,movingAvgLatency,toUpdateNumConts)
+        logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} at instant: ${curInstant} initTime: ${initTime}")
+        tempInvokerStats.updateActionStats(actionName,latencyVal,initTime,toUpdateNumConts)
     }
   } 
 
@@ -191,25 +214,6 @@ class ActionStats(val actionName:String,logging: Logging){
       }
 
     }
-
-    /*usedInvokers.keys.foreach{
-      curInvoker => 
-      usedInvokers.get(curInvoker) match {
-        case Some(curInvokerStats) => 
-          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
-          // If I fit, I will choose this.
-          // TODO: Change this so that I iterate based on some "ranking"
-          if(curInvokerStats.capacityRemaining(actionName)){
-            var curInstant: Long = Instant.now.toEpochMilli
-            lastInstantUsed(curInvoker) = curInstant
-            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
-            return Some(curInvoker)
-          }
-        case None =>
-          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
-      }
-
-    } */
 
     logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get a used invoker :( :( ")
     None
@@ -237,7 +241,7 @@ class ActionStats(val actionName:String,logging: Logging){
       }
     }
     // if it has come here, then I don't have anything..     
-    logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName} did not get an active invoker :( :( ")
+    logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName} did not get an active invoker :( :(, which is of size: ${activeInvokers.size}")
     None
   } 
 
@@ -309,25 +313,21 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     logging.info(this,s"\t <avs_debug> <AIS> <addAction> Action: ${toAddAction} is of type: ${myActType} and runtime: ${myStandaloneRuntime}")
   }
 
-  def updateActionStats(toUpdateAction:String, movingAvgLatency: Long, toUpdateNumConts:Int):Unit = {
+  def updateActionStats(toUpdateAction:String, latencyVal: Long,initTime: Long, toUpdateNumConts:Int):Unit = {
     var actType = getActionType(toUpdateAction)
     var bef_pendingReqs = inFlightReqsByType(actType)
     var after_pendingReqs = if(bef_pendingReqs > 0)  bef_pendingReqs-1 else 0
     inFlightReqsByType(actType) = after_pendingReqs // ok will have an outstanding request of my type..
     allActions.get(toUpdateAction) match {
       case Some(curActStats) => 
-        curActStats.numConts = toUpdateNumConts
-        curActStats.movingAvgLatency = movingAvgLatency
-        curActStats.lastUpdated = Instant.now.toEpochMilli
+        //curActStats.updateOpZone()
+        curActStats.update(latencyVal,initTime,toUpdateNumConts)
         logging.info(this,s"\t <avs_debug> <AIS> <updateActionStats> 1. invoker: ${id.toInt} bef-pendingReqs: ${bef_pendingReqs} aft-: ${inFlightReqsByType(actType)} action: ${toUpdateAction} numConts: ${curActStats.numConts} movingAvgLatency: ${curActStats.movingAvgLatency} lastUpdated: ${curActStats.lastUpdated}")     
-        curActStats.updateOpZone()
       case None =>
         //allActions = allActions + (toUpdateAction -> new ActionStatsPerInvoker(toUpdateAction,logging))
         addAction(toUpdateAction)
         var tempActStats: ActionStatsPerInvoker = allActions(toUpdateAction)
-        tempActStats.numConts = toUpdateNumConts
-        tempActStats.movingAvgLatency = movingAvgLatency
-        tempActStats.lastUpdated = Instant.now.toEpochMilli
+        tempActStats.update(latencyVal,initTime,toUpdateNumConts)
         logging.info(this,s"\t <avs_debug> <AIS> <updateActionStats> 2. invoker: ${id.toInt} bef-pendingReqs: ${bef_pendingReqs} aft-: ${inFlightReqsByType(actType)} action: ${toUpdateAction} numConts: ${tempActStats.numConts} movingAvgLatency: ${tempActStats.movingAvgLatency} lastUpdated: ${tempActStats.lastUpdated}")     
     }
   }
@@ -336,7 +336,8 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     allActions.get(toCheckAction) match {
       case Some(curActStats) => 
         var curTime: Long = Instant.now.toEpochMilli
-        if( (curTime - curActStats.lastUpdated) > statsTimeoutInMilli)
+        var timeDiff: Long = curTime - curActStats.lastUpdated
+        if(  ( timeDiff > statsTimeoutInMilli) || ( timeDiff > curActStats.statsResetTimeout ) )
           curActStats.resetStats(curTime)
 
         logging.info(this,s"\t <avs_debug> <AIS> <findActionNumContsOpZone> 1. invoker: ${id.toInt} has action: ${toCheckAction}, it has numConts: ${curActStats.numConts} and it's opZone: ${curActStats.opZone}")     

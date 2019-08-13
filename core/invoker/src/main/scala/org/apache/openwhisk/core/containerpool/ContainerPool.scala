@@ -44,7 +44,7 @@ class contStatsData(var cpuShares: Int,val trackContId:Int){
   var numTimesUsed: Int = 0
 }
 
-class toRelayActionStats(val actionName: String,val avgLatency: Long,val numConts: Int){
+class toRelayActionStats(val actionName: String,val avgLatency: Long, val numConts: Int){
 }
 
 class funcConfigTracking(
@@ -59,7 +59,6 @@ class funcConfigTracking(
   val defaultCpuShares = 32
   var curCpuShares = defaultCpuShares
   var avgLatency: Long = 0
-
   def getDefaultCpuShares(): Int = {
     defaultCpuShares
   }
@@ -374,7 +373,6 @@ class TrackFunctionStats(
     }else{
       0
     }
-
   }
 }
 // avs --end
@@ -408,6 +406,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     extends Actor {
   import ContainerPool.memoryConsumptionOf
   import ContainerPool.getCurActionStats // avs
+  import ContainerPool.getCurActionConts // avs
   //import ContainerPool.cpuSharesConsumptionOf
   import ContainerPool.cpuSharesCheck
   implicit val logging = new AkkaLogging(context.system.log)
@@ -721,8 +720,10 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       }
       // But will send completion-ack to stats tracking in LB.
       // Not sure whether I want to always send it back, for now, assuming that this is the design we will stick with.
-      var curActStats : toRelayActionStats = getCurActionStats(actionName,logging)
-      relayActionStats(curActStats,controllerID.asString)
+
+      //var curActStats : toRelayActionStats = getCurActionStats(actionName,logging)
+      var numConts = getCurActionConts(actionName,logging)
+      relayActionStats(actionName,runtime,initTime,numConts,controllerID.asString)
       logging.info(this, s"<avs_debug> <UpdateStats> end-getCurActionStats ")
 
     case RemoveContTracking(container: Container, actionName: String) => 
@@ -746,9 +747,10 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
 
     case getAllLatency(curActName: String,controllerID: Int) =>
       logging.info(this, s"<avs_debug> <getAllLatency> start-getCurActionStats ")
-      //var curActStatsMessage : ActionStatsMessage = getCurActionStats(curActName,logging)
       var curActStats : toRelayActionStats = getCurActionStats(curActName,logging)
-      relayActionStats(curActStats,controllerID.toString)
+      // new toRelayActionStats(curActName, tempAvgLatency, tempNumConts)
+      // toRelayActionStats(val actionName: String,val avgLatency: Long,val numConts: Int)
+      relayActionStats(curActStats.actionName,curActStats.avgLatency,2,curActStats.numConts,controllerID.toString)
       logging.info(this, s"<avs_debug> <getAllLatency> end-getCurActionStats ")
 
     //avs --end
@@ -947,6 +949,18 @@ object ContainerPool {
 
   }
 
+  def getCurActionConts(curActName: String, logging: AkkaLogging): Int = {
+    var pool: Map[String,funcConfigTracking] = cpuSharesPool;
+
+    cpuSharesPool.get(curActName) match {
+      case Some(myConfig) =>
+        logging.info(this, s"<avs_debug><getCurActionConts> <initData> action: ${curActName} tempNumConts: ${myConfig.numContainerTracked()}")      
+        myConfig.numContainerTracked()
+      case None =>
+        0
+    }
+  }  
+
   def getCurActionStats(curActName: String, logging: AkkaLogging): toRelayActionStats = {
     var pool: Map[String,funcConfigTracking] = cpuSharesPool;
 
@@ -954,11 +968,9 @@ object ContainerPool {
       case Some(myConfig) =>
         var tempAvgLatency = myConfig.getCurAvgLatency()
         var tempNumConts = myConfig.numContainerTracked()
-        //ActionStatsMessage(curActName,tempAvgLatency,tempNumConts)
-        logging.info(this, s"<avs_debug><getCurActionStats> <initData> action: ${curActName} tempAvgLatency: ${tempAvgLatency} tempNumConts: ${tempNumConts}  ")      
+        logging.info(this, s"<avs_debug><getCurActionStats> <initData> action: ${curActName} tempAvgLatency: ${tempAvgLatency} tempNumConts: ${tempNumConts}")      
         new toRelayActionStats(curActName, tempAvgLatency, tempNumConts)
       case None =>
-        //ActionStatsMessage(curActName,0,0)
         new toRelayActionStats(curActName, 0, 0)
     }
   }  
