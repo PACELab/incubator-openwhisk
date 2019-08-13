@@ -384,13 +384,15 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     allInvokers.get(invoker.id) match {
       case Some(curInvokerStats) =>
         logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is PRESENT in allInvokers ")
-        curInvokerStats.capacityRemaining(actionName)
+        val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
+        decision
       case None =>
         allInvokers = allInvokers + (invoker.id -> new AdapativeInvokerStats(invoker.id,invoker.status,logging) )
         logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is ABSENT in allInvokers ")
         var tempInvokerStats = allInvokers(invoker.id)
         tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
-        tempInvokerStats.capacityRemaining(actionName)
+        val (numInFlightReqs,decision) = tempInvokerStats.capacityRemaining(actionName)
+        decision
       } 
   }
 

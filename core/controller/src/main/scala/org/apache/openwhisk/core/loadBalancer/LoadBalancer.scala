@@ -30,7 +30,7 @@ import scala.collection.mutable //avs
 import scala.collection.immutable //avs
 import scala.collection.mutable.ListBuffer //avs
 import java.time.Instant // avs
-import scala.collection.immutable.ListMap // avs
+//import scala.collection.immutable.ListMap // avs
 //import util.control.Breaks._ // avs
 // avs --begin
 
@@ -171,13 +171,17 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
 
 }
 
+class InvokerRunningState(var numInFlightReqs: Int,var lastUsed: Long,var invoker:InvokerInstanceId){
+
+}
 // the stats of an action across all invokers. Tracked per Invoker.
 class ActionStats(val actionName:String,logging: Logging){
   var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
   var lastInstantUsed = mutable.Map.empty[InvokerInstanceId, Long]
+  var cmplxLastInstUsed = mutable.Map.empty[InvokerInstanceId, InvokerRunningState]
 
   def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,latencyVal: Long,initTime: Long, toUpdateNumConts: Int){
-    var curInstant: Long = Instant.now.toEpochMilli
+    
     usedInvokers.get(invoker) match{
       case Some(curInvokerStats) =>
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} initTime: ${initTime}")
@@ -186,8 +190,12 @@ class ActionStats(val actionName:String,logging: Logging){
         //lastInstantUsed(invoker) = curInstant // should be ok, but will only update when it is allocated..
       case None =>
         usedInvokers = usedInvokers + (invoker -> invokerStats)
+
+        var curInstant: Long = Instant.now.toEpochMilli
         lastInstantUsed = lastInstantUsed + (invoker -> curInstant)
+        cmplxLastInstUsed = cmplxLastInstUsed + (invoker -> new InvokerRunningState(0,curInstant,invoker))
         var tempInvokerStats:AdapativeInvokerStats  = usedInvokers(invoker)
+
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} at instant: ${curInstant} initTime: ${initTime}")
         tempInvokerStats.updateActionStats(actionName,latencyVal,initTime,toUpdateNumConts)
     }
@@ -195,7 +203,40 @@ class ActionStats(val actionName:String,logging: Logging){
 
   def getUsedInvoker(): Option[InvokerInstanceId] = {
 
-    ListMap(lastInstantUsed.toSeq.sortWith(_._2 > _._2):_*).keys.foreach{
+    var blah = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.numInFlightReqs,curEle._2.lastUsed))(Ordering[(Int,Long)].reverse)
+
+    blah.foreach{
+      case (curInvoker,curInvokerRunningState) => 
+        //val curInvokerRunningState: InvokerRunningState = cmplxLastInstUsed(curInvoker)
+        logging.info(this,s"\t <avs_debug> <CBGetUsedInvoker> Action: ${actionName}, invoker: ${curInvokerRunningState.invoker.toInt} was the invoker used at ${curInvokerRunningState.lastUsed} and had #inflight-reqs: ${curInvokerRunningState.numInFlightReqs} ")
+
+        logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
+        // If I fit, I will choose this.
+        // TODO: Change this so that I iterate based on some "ranking"
+        var curInvokerStats: AdapativeInvokerStats = usedInvokers(curInvoker)
+        val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
+        if(decision){
+          var curInstant: Long = Instant.now.toEpochMilli
+          lastInstantUsed(curInvoker) = curInstant
+
+          cmplxLastInstUsed(curInvoker).numInFlightReqs = numInFlightReqs
+          cmplxLastInstUsed(curInvoker).lastUsed = curInstant
+
+          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
+          return Some(curInvoker)
+        }      
+    }
+
+    //ListMap(cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.numInFlightReqs,curEle._2.lastUsed))(Ordering[(Int,Long)].reverse): _*).keys().foreach{
+    //  curInvoker =>
+    //  logging.info(this,s"\t <avs_debug> <CBGetUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} was the invoker used at ${cmplxLastInstUsed(curInvoker).lastUsed} and had #inflight-reqs: ${cmplxLastInstUsed(curInvoker).numInFlightReqs}")
+    //}
+
+    //ListMap(cmplxLastInstUsed.toSeq.sortBy(_._2.numInFlightReqs,_._2.lastUsed)(Ordering[Int].reverse):_*)
+    //ListMap(cmplxLastInstUsed.toSeq.sortBy( cmplxLastInstUsed.toSeq => (_._2.numInFlightReqs,_._2.lastUsed) )(Ordering[Long].reverse)).keys().foreach{
+    //}
+
+    /*ListMap(lastInstantUsed.toSeq.sortWith(_._2 > _._2):_*).keys.foreach{
       curInvoker => 
       logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} was the invoker used at ${lastInstantUsed(curInvoker)}")
       usedInvokers.get(curInvoker) match {
@@ -203,17 +244,21 @@ class ActionStats(val actionName:String,logging: Logging){
           logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
           // If I fit, I will choose this.
           // TODO: Change this so that I iterate based on some "ranking"
-          if(curInvokerStats.capacityRemaining(actionName)){
+          val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
+          if(decision){
             var curInstant: Long = Instant.now.toEpochMilli
             lastInstantUsed(curInvoker) = curInstant
+
+            cmplxLastInstUsed(curInvoker).numInFlightReqs = numInFlightReqs
+            cmplxLastInstUsed(curInvoker).lastUsed = curInstant
+
             logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
             return Some(curInvoker)
           }
         case None =>
           logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
       }
-
-    }
+    }*/
 
     logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get a used invoker :( :( ")
     None
@@ -228,10 +273,15 @@ class ActionStats(val actionName:String,logging: Logging){
           logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName}, invoker: ${curInvoker.id.toInt} checking whether it has any capacityRemaining...")
           // If I fit, I will choose this.
           // TODO: Change this so that I iterate based on some "ranking"
-          if(curInvokerStats.capacityRemaining(actionName)){
+          val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
+          if(decision){
 
             var curInstant: Long = Instant.now.toEpochMilli
             lastInstantUsed(curInvoker.id) = curInstant
+
+            cmplxLastInstUsed(curInvoker.id).numInFlightReqs = numInFlightReqs
+            cmplxLastInstUsed(curInvoker.id).lastUsed = curInstant            
+
             logging.info(this,s"\t <avs_debug> <getActiveInvoker> Invoker: ${curInvoker.id.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker.id)}")  
 
             return Some(curInvoker.id)
@@ -395,7 +445,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     inFlightReqsByType("ET")+inFlightReqsByType("MP")
   }
 
-  def capacityRemaining(actionName:String): Boolean = { // should update based on -- memory; #et, #mp and operating zone
+  def capacityRemaining(actionName:String): (Int,Boolean) = { // should update based on -- memory; #et, #mp and operating zone
     // 1. Check action-type. Alternatively, can send this as a parameter from the schedule-method
     // 2. Check whether we can accommodate this actionType (ET vs MP)? 
     //  2.a. If already a container of this action exists, ensure it is in safe opZone.
@@ -438,6 +488,12 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       if ( ( inFlightReqsByType(actType) < maxInFlightReqs_ET) && (status_opZone!= opZoneUnSafe ) ){
         logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
         // ok, I don't have too many pending requests here..
+
+        // If I don't have any more containers (myTypeConts==0) of my type, I will try not to accept utmost 1 request!
+        /*if( (myTypeConts==0) && (inFlightReqsByType(actType) > myTypeConts) ){
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-0.5> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+          retVal = false
+        }*/
         if( (myTypeConts < myResources.numCores) ){
           logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
           // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.
@@ -478,7 +534,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
 
     logging.info(this,s"\t <avs_debug> <AIS> <capRem> Final. invoker: ${id.toInt} has action: ${actionName} of type: ${actType} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
-    retVal
+    (inFlightReqsByType(actType),retVal)
   }
 
 }
