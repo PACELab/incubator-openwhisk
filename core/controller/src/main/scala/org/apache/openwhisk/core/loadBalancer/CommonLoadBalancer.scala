@@ -65,6 +65,9 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   val rrLbConfig: RoundRobinContainerPoolBalancerConfig =
     loadConfigOrThrow[RoundRobinContainerPoolBalancerConfig](ConfigKeys.loadbalancer)
 
+  val leastConn_lbConfig: LeastConnectionsContainerPoolBalancerConfig =
+    loadConfigOrThrow[LeastConnectionsContainerPoolBalancerConfig](ConfigKeys.loadbalancer)
+
   protected val invokerPool: ActorRef
 
   // avs --begin
@@ -294,6 +297,23 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
       }
       toFillBuf
     }
+
+  //getNumConnections: (InvokerHealth,String) => Int, // needToUpgradeInvoker: (ListBuffer[InvokerHealth])=> Boolean 
+  type gncType = (InvokerInstanceId,String) => Int    
+  val gNC: gncType = (invoker: InvokerInstanceId, actionName: String) => {
+    logging.info(this,s"<avs_debug> <getNumConnections> on invoker: ${invoker.toInt}")
+    allInvokers.get(invoker) match {
+      case Some(curInvokerStats) =>
+        logging.info(this,s"<avs_debug> in <getNumConnections> invoker: ${invoker.toInt} is PRESENT in allInvokers ")
+        curInvokerStats.getNumConnections(actionName)
+      case None =>
+        allInvokers = allInvokers + (invoker -> new AdapativeInvokerStats(invoker,InvokerState.Healthy,logging) )
+        logging.info(this,s"<avs_debug> in <getNumConnections> invoker: ${invoker.toInt} is ABSENT in allInvokers ")
+        var tempInvokerStats = allInvokers(invoker)
+        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+        tempInvokerStats.getNumConnections(actionName)
+      }     
+  }
 
   //type gifaType (String,InvokerHealth) => Option[InvokerInstanceId]
   type guifaType = (String) => Option[InvokerInstanceId]

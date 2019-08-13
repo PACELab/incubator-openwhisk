@@ -386,6 +386,15 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     numConts("ET")+inFlightReqsByType("ET")+numConts("MP")+inFlightReqsByType("MP")
   }
 
+  def getNumConnections(actionName:String): Int ={
+    /*if(getActionType(actionName)=="ET"){
+      inFlightReqsByType("ET")
+    }else{
+      inFlightReqsByType("MP")   
+    }*/
+    inFlightReqsByType("ET")+inFlightReqsByType("MP")
+  }
+
   def capacityRemaining(actionName:String): Boolean = { // should update based on -- memory; #et, #mp and operating zone
     // 1. Check action-type. Alternatively, can send this as a parameter from the schedule-method
     // 2. Check whether we can accommodate this actionType (ET vs MP)? 
