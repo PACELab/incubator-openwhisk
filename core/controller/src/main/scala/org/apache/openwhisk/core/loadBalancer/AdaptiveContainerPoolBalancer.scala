@@ -43,6 +43,7 @@ import scala.annotation.tailrec
 import scala.concurrent.Future
 import scala.collection.mutable //avs
 import scala.collection.mutable.ListBuffer //avs
+import org.apache.openwhisk.core.entity.ActivationId.ActivationIdGenerator
 import java.time.Instant // avs
 
 // avs --begin
@@ -66,6 +67,18 @@ class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealt
       logging.info(this,s"<avs_debug> <AIPM> <upgradeInvoker> No inactive-invokers present! Should use random assignment..")
       return None
     }   
+  }
+
+  def makeInvokerActive(toActivateInvoker: InvokerHealth): Unit = {
+    if(!activeInvokers.contains(toActivateInvoker)){
+      logging.info(this,s"<avs_debug> <AIPM> <makeInvokerActive> invoker: ${toActivateInvoker.id.toInt} is being made active.. ")
+      if(inactiveInvokers.contains(toActivateInvoker)){
+        inactiveInvokers-=toActivateInvoker
+      }
+      activeInvokers+=toActivateInvoker
+    }else{
+      logging.info(this,s"<avs_debug> <AIPM> <makeInvokerActive> invoker: ${toActivateInvoker.id.toInt} is already active.. ")
+    }
   }
 
   // used to push an invoker, if available, to go from in-active state to active state.
@@ -103,7 +116,7 @@ class AdaptiveContainerPoolBalancer(
   materializer: ActorMaterializer)
     extends CommonLoadBalancer(config, feedFactory, loadFeedFactory,controllerInstance) { 
 //extends CommonLoadBalancer(config, feedFactory,controllerInstance) // avs added loadFeedFactory
-  private var prevInvokerUsed = 0; // avs //will be helpful for round-robin
+  private var toUseProactiveInvokerId = 0; // avs //will be helpful for round-robin
   //import loadBalancer.allInvokers //avs
 
   /** Build a cluster of all loadbalancers */
@@ -215,13 +228,16 @@ class AdaptiveContainerPoolBalancer(
       if (!isBlackboxInvocation) (schedulingState.managedInvokers, schedulingState.managedStepSizes)
       else (schedulingState.blackboxInvokers, schedulingState.blackboxStepSizes)
 
+    var beginInstant: Long = Instant.now.toEpochMilli;
+    var proactiveBegin: Long = 0
+    var endInstant: Long =0 
     val chosen = if (invokersToUse.nonEmpty) {
       val hash = AdaptiveContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
       // avs --begin
       /*val homeInvoker = hash % invokersToUse.size
       val stepSize = stepSizes(hash % stepSizes.size) */
       // to make it round-robin, will update the invoker used for previous invocation, and loopback later.
-      val homeInvoker = (prevInvokerUsed)%invokersToUse.size
+      val homeInvoker = (toUseProactiveInvokerId)%invokersToUse.size
       val stepSize = 1
       // avs --end
       logging.info(this,s"<avs_debug> <AdaptiveContainerPoolBalancer> <publish> Calling schedule for activation ${msg.activationId} for '${msg.action.asString}' ($actionType) ") // avs
@@ -272,10 +288,45 @@ class AdaptiveContainerPoolBalancer(
 
     chosen
       .map { invoker =>
-        prevInvokerUsed = invoker.toInt //avs
+        // TODO: Should somehow ensure toUseProactiveInvoker will be upgraded and is active! 
+        toUseProactiveInvokerId = (invoker.toInt+1)%schedulingState.managedInvokers.size //curInvokerPoolMaintenance.activeInvokers.size //avs 
+
         logging.info(
           this,
-          s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to (schedule) $invoker and prevInvokerUsed: ${prevInvokerUsed}")        
+          s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to (schedule) $invoker and toUseProactiveInvokerId: ${toUseProactiveInvokerId}")        
+
+        // avs --begin
+        proactiveBegin = Instant.now.toEpochMilli
+        if(checkInvokerOpZone(invoker,action.name.asString)){
+          val proactiveMsg = ActivationMessage(
+            // Use the sid of the InvokerSupervisor as tid
+            transid = transid,
+            action = action.fullyQualifiedName(true),
+            // Use empty DocRevision to force the invoker to pull the action from db all the time
+            revision = DocRevision.empty,
+            user = msg.user,
+            // Create a new Activation ID for this activation
+            activationId = new ActivationIdGenerator {}.make(),
+            rootControllerIndex = msg.rootControllerIndex, //controllerInstance,
+            blocking = false,
+            content = None)
+
+          val proactiveInvoker: InvokerHealth = schedulingState.managedInvokers(toUseProactiveInvokerId)
+          schedulingState.curInvokerPoolMaintenance.makeInvokerActive(proactiveInvoker)
+          val proActiveResult = setupActivation(proactiveMsg, action, proactiveInvoker.id)
+          sendActivationToInvoker(messageProducer, proactiveMsg, proactiveInvoker.id).map(_ => proActiveResult)          
+
+          endInstant = Instant.now.toEpochMilli // avs
+          logging.info(this,s"<avs_debug> <ProContSpawn> 1.0 CurActivation: ${msg.activationId} if issued a new activation, it'd be given id.: ${proactiveMsg.activationId} (end-proactiveBegin): ${endInstant-proactiveBegin} end: ${endInstant} proactiveBegin: ${proactiveBegin}")
+        }else{
+          logging.info(this,s"<avs_debug> <ProContSpawn> 2.0 activation: ${msg.activationId}")
+        }
+
+        endInstant = Instant.now.toEpochMilli // avs
+        logging.info(this,s"<avs_debug> <ProContSpawn> DONE dispatching activation: ${msg.activationId} time-taken(end-begin): ${endInstant-beginInstant} end: ${endInstant} begun: ${beginInstant}")
+        //logging.info(this,s"<avs_debug> <ProContSpawn> DONE dispatching activation: ${msg.activationId} time-taken(end-begin): ${endInstant-beginInstant} end: ${endInstant} begun: ${beginInstant}")
+        //logging.info(this,s"<avs_debug> <ProContSpawn> If issued a new activation, it'd be given id.: ${proactiveMsg.activationId} (end-proactiveBegin): ${endInstant-proactiveBegin} end: ${endInstant} proactiveBegin: ${proactiveBegin}")
+        // avs --end
 
         val activationResult = setupActivation(msg, action, invoker)
         sendActivationToInvoker(messageProducer, msg, invoker).map(_ => activationResult)

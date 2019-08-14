@@ -338,17 +338,26 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
   // Instant.now.toEpochMilli
 
+  var maxInFlightReqsByType = mutable.Map.empty[String, Double]
+  maxInFlightReqsByType = maxInFlightReqsByType + ("ET" -> 1.5 * myResources.numCores)
+  maxInFlightReqsByType = maxInFlightReqsByType + ("MP" -> 1.0 * myResources.numCores)
+
   // -------------- Thresholds --------------
-  var maxInFlightReqs_ET = 1.5 * myResources.numCores
-  var maxInFlightReqs_MP = 1.0 * myResources.numCores
+  //var maxInFlightReqs_ET = 1.5 * myResources.numCores
+  //var maxInFlightReqs_MP = 1.0 * myResources.numCores
+  var warningZoneThd:Double = 0.5
   // -------------- Thresholds --------------
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
     myResources.numCores = toSetNumCores
     myResources.memorySize = toSetMemory
 
-    maxInFlightReqs_ET = 1.5 * myResources.numCores
-    maxInFlightReqs_MP = 1.0 * myResources.numCores
+    //maxInFlightReqs_ET = 1.5 * myResources.numCores
+    //maxInFlightReqs_MP = 1.0 * myResources.numCores
+
+    maxInFlightReqsByType = maxInFlightReqsByType + ("ET" -> 1.5 * myResources.numCores)
+    maxInFlightReqsByType = maxInFlightReqsByType + ("MP" -> 1.0 * myResources.numCores)
+
   }
   def addAction(toAddAction: String):Unit = {
     logging.info(this,s"\t <avs_debug> <AIS> <addAction> Trying to add action: ${toAddAction} to allActions")
@@ -454,6 +463,24 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     inFlightReqsByType("ET")+inFlightReqsByType("MP")
   }
 
+  def checkInvokerActTypeOpZone(actionName: String): Boolean ={
+    var actType = getActionType(actionName)  
+    //updateActTypeStats()
+    var (myConts,status_opZone) = findActionNumContsOpZone(actionName)
+    var myTypeConts = numConts(actType)  
+
+    var retVal: Boolean = false
+    logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 0. invoker: ${id.toInt} action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone}  inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} maxInFlightReqsByType(actType): ${maxInFlightReqsByType(actType)}")
+    if( inFlightReqsByType(actType) > (warningZoneThd *maxInFlightReqsByType(actType) ) ){
+      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 1. invoker: ${id.toInt} inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} is atleast ${warningZoneThd*maxInFlightReqsByType(actType)} (warningZoneThd*maxInFlightReqsByType(actType))")
+      retVal = true
+    }else if(myTypeConts > (warningZoneThd*maxInFlightReqsByType(actType))){
+      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${ myTypeConts} is atleast ${warningZoneThd*maxInFlightReqsByType(actType)} (warningZoneThd*maxInFlightReqsByType(actType))")
+      retVal = true      
+    }
+    retVal
+  }
+
   def capacityRemaining(actionName:String): (Int,Boolean) = { // should update based on -- memory; #et, #mp and operating zone
     // 1. Check action-type. Alternatively, can send this as a parameter from the schedule-method
     // 2. Check whether we can accommodate this actionType (ET vs MP)? 
@@ -473,7 +500,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
       logging.info(this,s"\t <avs_debug> <AIS> <capRem> 1. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} and myTypeConts: ${myTypeConts} ")
 
-      if( (inFlightReqsByType(actType) < maxInFlightReqs_MP) && (status_opZone!= opZoneUnSafe)) {
+      if( (inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe)) {
         // Ok, I can accommodate atleast one request..
         logging.info(this,s"\t <avs_debug> <AIS> <capRem> <MP-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
         if( (myTypeConts < myResources.numCores)){
@@ -494,7 +521,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     }
     else if(actType == "ET"){
       logging.info(this,s"\t <avs_debug> <AIS> <capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
-      if ( ( inFlightReqsByType(actType) < maxInFlightReqs_ET) && (status_opZone!= opZoneUnSafe ) ){
+      if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
         logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
         // ok, I don't have too many pending requests here..
 
@@ -529,7 +556,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
             retVal = false
           }
         }else{
-          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2-Inv> invoker: ${id.toInt} maxInFlightReqs_ET: ${maxInFlightReqs_ET} myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
+          logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2-Inv> invoker: ${id.toInt} maxInFlightReqsByType(ET): ${maxInFlightReqsByType(actType)} myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
           // No way JOSE! Can't have > twice the num of ET containers.
           retVal = false
         }
