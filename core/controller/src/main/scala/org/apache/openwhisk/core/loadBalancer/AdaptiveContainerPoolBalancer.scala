@@ -265,17 +265,18 @@ class AdaptiveContainerPoolBalancer(
           //var invokersToDowngrade: ListBuffer[InvokerHealth] = needToDowngradeInvoker(activeInvokers)
           schedulingState.curInvokerPoolMaintenance.downgradeInvoker(needToDowngradeInvoker(schedulingState.curInvokerPoolMaintenance.activeInvokers))
         }
-        
     }else if(schedulingState.curInvokerPoolMaintenance.shouldUpgradeInvoker){
       schedulingState.curInvokerPoolMaintenance.upgradeInvoker()
     }
 // avs --end
+
     chosen
       .map { invoker =>
         prevInvokerUsed = invoker.toInt //avs
         logging.info(
           this,
           s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to (schedule) $invoker and prevInvokerUsed: ${prevInvokerUsed}")        
+
         val activationResult = setupActivation(msg, action, invoker)
         sendActivationToInvoker(messageProducer, msg, invoker).map(_ => activationResult)
 
@@ -290,8 +291,6 @@ class AdaptiveContainerPoolBalancer(
         logging.error(this, s"failed to schedule $actionType action, invokers to use: $invokerStates")
         Future.failed(LoadBalancerException("No invokers available"))
       }
-
-
   }
 
   override val invokerPool =

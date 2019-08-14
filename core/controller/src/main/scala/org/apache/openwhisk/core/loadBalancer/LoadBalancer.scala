@@ -147,7 +147,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
     // a. statsTimeoutInMilli : Atleast a container would have died.
     // b. statsResetTimeout: It would have passed some time, so, the load should have subsided..
 
-    logging.info(this,s"\t <avs_debug> <ASPI> <resetStats> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats since: curTime: ${curTime} is larger than lastUpdated: ${lastUpdated} by ${statsTimeoutInMilli} or ${statsResetTimeout} ") 
+    logging.info(this,s"\t <avs_debug> <ASPI> <resetStats> In updateOpZone of Action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats since: curTime: ${curTime} is larger than lastUpdated: ${lastUpdated} by ${statsTimeoutInMilli} or ${statsResetTimeout} opZone: ${opZone}") 
     opZone = 0 
     movingAvgLatency = 0
     numConts = 0
@@ -166,6 +166,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
     }
     numConts = toUpdateNumConts
     movingAvgLatency = if(runningCount>0) (cumulSum/runningCount) else 0
+    updateOpZone()
     logging.info(this,s"\t <avs_debug> <ASPI> <update> In update of Action: ${actionName} myInvokerID: ${myInvokerID}, latency: ${latency} count: ${runningCount} cumulSum: ${cumulSum} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} ")     
   }
 
@@ -321,9 +322,13 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   actionTypeOpZone = actionTypeOpZone + ("MP" -> opZoneSafe)
 
   var allActions = mutable.Map.empty[String, ActionStatsPerInvoker]
-  var allActionsByType = mutable.Map.empty[String, ListBuffer[String]]
-  allActionsByType = allActionsByType + ("ET" -> new mutable.ListBuffer[String])
-  allActionsByType = allActionsByType + ("MP" -> new mutable.ListBuffer[String])
+  //var allActionsByType = mutable.Map.empty[String, ListBuffer[String]]
+  //allActionsByType = allActionsByType + ("ET" -> new mutable.ListBuffer[String])
+  //allActionsByType = allActionsByType + ("MP" -> new mutable.ListBuffer[String])
+
+  var allActionsByType = mutable.Map.empty[String, mutable.Map[String,Int]]
+  allActionsByType = allActionsByType + ("ET" -> mutable.Map.empty[String,Int])
+  allActionsByType = allActionsByType + ("MP" -> mutable.Map.empty[String,Int])
 
   var inFlightReqsByType = mutable.Map.empty[String, Int]
   inFlightReqsByType = inFlightReqsByType + ("ET" -> 0)
@@ -356,7 +361,8 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         allActions = allActions + (toAddAction -> new ActionStatsPerInvoker(toAddAction,id.toInt,logging))
         var myActType = getActionType(toAddAction)
         // this way, I will only add it once!
-        allActionsByType(myActType)+=toAddAction //
+        //allActionsByType(myActType)+=toAddAction //
+        allActionsByType(myActType) = allActionsByType(myActType) + (toAddAction -> 1 )
     }
     var myActType = getActionType(toAddAction);
     var myStandaloneRuntime = getFunctionRuntime(toAddAction)
@@ -370,8 +376,8 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     inFlightReqsByType(actType) = after_pendingReqs // ok will have an outstanding request of my type..
     allActions.get(toUpdateAction) match {
       case Some(curActStats) => 
-        //curActStats.updateOpZone()
         curActStats.update(latencyVal,initTime,toUpdateNumConts)
+        //curActStats.updateOpZone()
         logging.info(this,s"\t <avs_debug> <AIS> <updateActionStats> 1. invoker: ${id.toInt} bef-pendingReqs: ${bef_pendingReqs} aft-: ${inFlightReqsByType(actType)} action: ${toUpdateAction} numConts: ${curActStats.numConts} movingAvgLatency: ${curActStats.movingAvgLatency} lastUpdated: ${curActStats.lastUpdated}")     
       case None =>
         //allActions = allActions + (toUpdateAction -> new ActionStatsPerInvoker(toUpdateAction,logging))
@@ -383,6 +389,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   }
 
   def findActionNumContsOpZone(toCheckAction: String): (Int,Int) = {
+    logging.info(this,s"\t <avs_debug> <AIS> <findActionNumContsOpZone> 0. invoker: ${id.toInt} has action: ${toCheckAction}")             
     allActions.get(toCheckAction) match {
       case Some(curActStats) => 
         var curTime: Long = Instant.now.toEpochMilli
@@ -403,10 +410,12 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   def updateActTypeStats(): Unit ={
     allActionsByType.keys.foreach{
       curActType => 
-      var allActionsOfCurType :ListBuffer[String] = allActionsByType(curActType)
+      //var allActionsOfCurType :ListBuffer[String] = allActionsByType(curActType)
+      var allActionsOfCurType :mutable.Map[String,Int]= allActionsByType(curActType)
       var accumNumConts = 0; var maxOpZone = 0
 
-      allActionsOfCurType.foreach{ curAction =>
+      //allActionsOfCurType.foreach{ curAction =>
+      allActionsOfCurType.keys.foreach{ curAction =>  
         val (numConts,thisActOpZone) = findActionNumContsOpZone(curAction)
         
         if(maxOpZone < thisActOpZone)
@@ -499,7 +508,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
           // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.
           // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
           retVal = true
-        }else if( myTypeConts <= (maxInFlightReqs_ET) ){
+        }else if( myTypeConts <= inFlightReqsByType(actType) ){
           logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
           // we have maxed out, making sure everybody is safe atleast.
           var myActTypeOpZone = actionTypeOpZone("ET")
