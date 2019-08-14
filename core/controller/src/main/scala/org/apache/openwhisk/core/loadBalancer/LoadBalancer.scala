@@ -101,7 +101,7 @@ class functionInfo {
 
   var statsTimeoutInMilli: Long = 60*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
   var resetNumInstances = 2 
-  var minResetTimeInMilli = 5*1000
+  var minResetTimeInMilli = 3*1000
 // avs --end  
 }
 
@@ -162,16 +162,16 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
     if(initTime==0){ // warm starts only!!
       cumulSum+= latency  
       runningCount+= 1
+      lastUpdated = Instant.now.toEpochMilli      
     }
     numConts = toUpdateNumConts
     movingAvgLatency = if(runningCount>0) (cumulSum/runningCount) else 0
-    lastUpdated = Instant.now.toEpochMilli
-    logging.info(this,s"\t <avs_debug> <ASPI> <update> In update of Action: ${actionName}, myInvokerID: ${myInvokerID} cumulSum: ${cumulSum} runningCount: ${runningCount} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} ")     
+    logging.info(this,s"\t <avs_debug> <ASPI> <update> In update of Action: ${actionName} myInvokerID: ${myInvokerID}, latency: ${latency} count: ${runningCount} cumulSum: ${cumulSum} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} ")     
   }
 
 }
 
-class InvokerRunningState(var numInFlightReqs: Int,var lastUsed: Long,var invoker:InvokerInstanceId){
+class InvokerRunningState(var numInFlightReqs: Int,var lastUsed: Long,var invokerRank:Int){
 
 }
 // the stats of an action across all invokers. Tracked per Invoker.
@@ -193,7 +193,7 @@ class ActionStats(val actionName:String,logging: Logging){
 
         var curInstant: Long = Instant.now.toEpochMilli
         lastInstantUsed = lastInstantUsed + (invoker -> curInstant)
-        cmplxLastInstUsed = cmplxLastInstUsed + (invoker -> new InvokerRunningState(0,curInstant,invoker))
+        cmplxLastInstUsed = cmplxLastInstUsed + (invoker -> new InvokerRunningState(0,curInstant,invoker.toInt))
         var tempInvokerStats:AdapativeInvokerStats  = usedInvokers(invoker)
 
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} at instant: ${curInstant} initTime: ${initTime}")
@@ -203,13 +203,13 @@ class ActionStats(val actionName:String,logging: Logging){
 
   def getUsedInvoker(): Option[InvokerInstanceId] = {
 
-    var blah = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.numInFlightReqs,curEle._2.lastUsed))(Ordering[(Int,Long)].reverse)
+    //var blah = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.numInFlightReqs,curEle._2.lastUsed))(Ordering[(Int,Long)].reverse)
+    var blah = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.invokerRank)) //(Ordering[(Int,Long)].reverse)
 
     blah.foreach{
       case (curInvoker,curInvokerRunningState) => 
         //val curInvokerRunningState: InvokerRunningState = cmplxLastInstUsed(curInvoker)
-        logging.info(this,s"\t <avs_debug> <CBGetUsedInvoker> Action: ${actionName}, invoker: ${curInvokerRunningState.invoker.toInt} was the invoker used at ${curInvokerRunningState.lastUsed} and had #inflight-reqs: ${curInvokerRunningState.numInFlightReqs} ")
-
+        logging.info(this,s"\t <avs_debug> <CBGetUsedInvoker> Action: ${actionName}, invoker: ${curInvokerRunningState.invokerRank} was the invoker used at ${curInvokerRunningState.lastUsed} and had #inflight-reqs: ${curInvokerRunningState.numInFlightReqs} ")
         logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
         // If I fit, I will choose this.
         // TODO: Change this so that I iterate based on some "ranking"
@@ -499,7 +499,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
           // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.
           // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
           retVal = true
-        }else if( myTypeConts < (maxInFlightReqs_ET) ){
+        }else if( myTypeConts <= (maxInFlightReqs_ET) ){
           logging.info(this,s"\t <avs_debug> <AIS> <capRem> <ET-2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
           // we have maxed out, making sure everybody is safe atleast.
           var myActTypeOpZone = actionTypeOpZone("ET")
