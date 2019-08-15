@@ -177,6 +177,7 @@ protected[actions] trait PrimitiveActions {
       activeAckTopicIndex,
       waitForResponse.isDefined,
       args,
+      proactiveSpawning = false, //avs 
       cause = cause,
       WhiskTracerProvider.tracer.getTraceContext(transid))
 

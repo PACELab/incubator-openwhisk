@@ -607,6 +607,20 @@ class ContainerProxy(
           // but potentially under-estimates actual deadline
           "deadline" -> (Instant.now.toEpochMilli + actionTimeout.toMillis).toString.toJson)
 
+        // avs --begin
+        if(job.msg.proactiveSpawning){
+          logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} is proactiveSpawning"); //avs 
+          logging.info(this, s"<initializeAndRun> caught expected proactiveSpawning while running activation: ${job.msg.activationId} of action: ${job.action.name}. Won't Run anything here..")
+          //val dummyJsVal: JsValue = {"msg":"Was proactiveSpawning!"}
+          Future.successful(ContainerProxy.constructWhiskActivation(
+            job,
+            None,
+            Interval.zero,
+            false,
+            ActivationResponse.developerError("{}")) )         
+        }else{
+          logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} IS NOT proactiveSpawning"); //avs 
+        // avs --end
         container
           .run(
             parameters,
@@ -625,6 +639,7 @@ class ContainerProxy(
                 runInterval.duration >= actionTimeout,
                 response)
           }
+        }
       }
       .recover {
         case InitializationError(interval, response) =>

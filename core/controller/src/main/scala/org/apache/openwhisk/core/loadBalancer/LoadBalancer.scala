@@ -346,6 +346,8 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   //var maxInFlightReqs_ET = 1.5 * myResources.numCores
   //var maxInFlightReqs_MP = 1.0 * myResources.numCores
   var warningZoneThd:Double = 0.5
+  var maxProactiveNumConts: Int = 2
+  var curNumProcactiveConts: Int = 0
   // -------------- Thresholds --------------
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
@@ -470,13 +472,39 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var myTypeConts = numConts(actType)  
 
     var retVal: Boolean = false
-    logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 0. invoker: ${id.toInt} action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone}  inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} maxInFlightReqsByType(actType): ${maxInFlightReqsByType(actType)}")
+    logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 0. invoker: ${id.toInt} action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone}  inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} maxInFlightReqsByType(actType): ${maxInFlightReqsByType(actType)}  curNumProcactiveConts: ${curNumProcactiveConts}")
+
     if( inFlightReqsByType(actType) > (warningZoneThd *maxInFlightReqsByType(actType) ) ){
-      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 1. invoker: ${id.toInt} inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} is atleast ${warningZoneThd*maxInFlightReqsByType(actType)} (warningZoneThd*maxInFlightReqsByType(actType))")
+      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 1. invoker: ${id.toInt} inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} is atleast ${warningZoneThd*maxInFlightReqsByType(actType)} (warningZoneThd*maxInFlightReqsByType(actType)) curNumProcactiveConts: ${curNumProcactiveConts}")
       retVal = true
+      curNumProcactiveConts+=1
     }else if(myTypeConts > (warningZoneThd*maxInFlightReqsByType(actType))){
-      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${ myTypeConts} is atleast ${warningZoneThd*maxInFlightReqsByType(actType)} (warningZoneThd*maxInFlightReqsByType(actType))")
+      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${ myTypeConts} is atleast ${warningZoneThd*maxInFlightReqsByType(actType)} (warningZoneThd*maxInFlightReqsByType(actType))  curNumProcactiveConts: ${curNumProcactiveConts}")
       retVal = true      
+      curNumProcactiveConts+=1
+    }else{
+      curNumProcactiveConts = 0
+      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 3. invoker: ${id.toInt} both conditions are neutralized, resetting curNumProcactiveConts: ${curNumProcactiveConts}")
+    }
+    if(curNumProcactiveConts>maxProactiveNumConts){
+      logging.info(this,s"\t <avs_debug> <AIS> <cInvActOpZ> 4. invoker: ${id.toInt} maxed out with proactivism, since curNumProcactiveConts: ${curNumProcactiveConts} is larger than maxProactiveNumConts")
+      retVal = false
+    }
+    retVal
+  }
+
+  def canDummyReqBeIssued(actionName: String): Boolean = {
+    
+    var actType = getActionType(actionName)
+    var retVal: Boolean = false
+
+    if(inFlightReqsByType(actType) < maxInFlightReqsByType(actType)){
+      inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
+      logging.info(this,s"\t <avs_debug> <AIS> <issuedDummyReq> 1. A dummy action of ${id.toInt} shall be issued.. in invoker: ${id.toInt}. Updating inFlightReqsByType to ${inFlightReqsByType(actType)}")
+      retVal = true
+    }else{
+      logging.info(this,s"\t <avs_debug> <AIS> <issuedDummyReq> 2. A dummy action of ${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
+      retVal = false
     }
     retVal
   }

@@ -298,26 +298,33 @@ class AdaptiveContainerPoolBalancer(
         // avs --begin
         proactiveBegin = Instant.now.toEpochMilli
         if(checkInvokerOpZone(invoker,action.name.asString)){
-          val proactiveMsg = ActivationMessage(
-            // Use the sid of the InvokerSupervisor as tid
-            transid = transid,
-            action = action.fullyQualifiedName(true),
-            // Use empty DocRevision to force the invoker to pull the action from db all the time
-            revision = DocRevision.empty,
-            user = msg.user,
-            // Create a new Activation ID for this activation
-            activationId = new ActivationIdGenerator {}.make(),
-            rootControllerIndex = msg.rootControllerIndex, //controllerInstance,
-            blocking = false,
-            content = None)
-
+          // should make logic more sensible  -- should allow dummy req only if inFlightReqs are less than max. If this invoker doesn't fit, issue it to next one maybe? 
           val proactiveInvoker: InvokerHealth = schedulingState.managedInvokers(toUseProactiveInvokerId)
-          schedulingState.curInvokerPoolMaintenance.makeInvokerActive(proactiveInvoker)
-          val proActiveResult = setupActivation(proactiveMsg, action, proactiveInvoker.id)
-          sendActivationToInvoker(messageProducer, proactiveMsg, proactiveInvoker.id).map(_ => proActiveResult)          
+          if(canIssueDummyReqToInvoker(proactiveInvoker.id,action.name.asString)){
+            val proactiveMsg = ActivationMessage(
+              // Use the sid of the InvokerSupervisor as tid
+              transid = transid,
+              action = action.fullyQualifiedName(true),
+              // Use empty DocRevision to force the invoker to pull the action from db all the time
+              revision = DocRevision.empty,
+              user = msg.user,
+              // Create a new Activation ID for this activation
+              activationId = new ActivationIdGenerator {}.make(),
+              rootControllerIndex = msg.rootControllerIndex, //controllerInstance,
+              blocking = false,
+              content = None,
+              proactiveSpawning = true
+            )
 
-          endInstant = Instant.now.toEpochMilli // avs
-          logging.info(this,s"<avs_debug> <ProContSpawn> 1.0 CurActivation: ${msg.activationId} if issued a new activation, it'd be given id.: ${proactiveMsg.activationId} (end-proactiveBegin): ${endInstant-proactiveBegin} end: ${endInstant} proactiveBegin: ${proactiveBegin}")
+            schedulingState.curInvokerPoolMaintenance.makeInvokerActive(proactiveInvoker)
+            val proActiveResult = setupActivation(proactiveMsg, action, proactiveInvoker.id)
+            sendActivationToInvoker(messageProducer, proactiveMsg, proactiveInvoker.id).map(_ => proActiveResult)          
+            endInstant = Instant.now.toEpochMilli // avs
+            
+            logging.info(this,s"<avs_debug> <ProContSpawn> 1.0 CurActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId} (end-proactiveBegin): ${endInstant-proactiveBegin} end: ${endInstant} proactiveBegin: ${proactiveBegin}")            
+          }else{
+            logging.info(this,s"<avs_debug> <ProContSpawn> 1.1 Want to issue a dummy req but, invoker: {toUseProactiveInvokerId} cannot accommodate a new request! ")            
+          }
         }else{
           logging.info(this,s"<avs_debug> <ProContSpawn> 2.0 activation: ${msg.activationId}")
         }
