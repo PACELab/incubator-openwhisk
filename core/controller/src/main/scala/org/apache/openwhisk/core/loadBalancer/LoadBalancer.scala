@@ -209,16 +209,13 @@ class ActionStats(val actionName:String,logging: Logging){
     }
   } 
 
-  def getUsedInvoker(): Option[InvokerInstanceId] = {
-
-    //var blah = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.numInFlightReqs,curEle._2.lastUsed))(Ordering[(Int,Long)].reverse)
-    /*var blah = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.invokerRank)) //(Ordering[(Int,Long)].reverse)
-
-    blah.foreach{
+  def getAutoScaleUsedInvoker(): Option[InvokerInstanceId] = {
+    var rankOrderedInvokers = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.invokerRank)) //(Ordering[(Int,Long)].reverse)
+    rankOrderedInvokers.foreach{
       case (curInvoker,curInvokerRunningState) => 
         //val curInvokerRunningState: InvokerRunningState = cmplxLastInstUsed(curInvoker)
-        logging.info(this,s"\t <avs_debug> <CBGetUsedInvoker> Action: ${actionName}, invoker: ${curInvokerRunningState.invokerRank} was the invoker used at ${curInvokerRunningState.lastUsed} and had #inflight-reqs: ${curInvokerRunningState.numInFlightReqs} ")
-        logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
+        logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName}, invoker: ${curInvokerRunningState.invokerRank} was the invoker used at ${curInvokerRunningState.lastUsed} and had #inflight-reqs: ${curInvokerRunningState.numInFlightReqs} ")
+        logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
         // If I fit, I will choose this.
         // TODO: Change this so that I iterate based on some "ranking"
         var curInvokerStats: AdapativeInvokerStats = usedInvokers(curInvoker)
@@ -230,15 +227,15 @@ class ActionStats(val actionName:String,logging: Logging){
           cmplxLastInstUsed(curInvoker).numInFlightReqs = numInFlightReqs
           cmplxLastInstUsed(curInvoker).lastUsed = curInstant
 
-          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
+          logging.info(this,s"\t <avs_debug> <gasUI> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
           return Some(curInvoker)
         }      
-    } */
+    }
+    logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName} did not get a used invoker :( :( ")
+    None
+  }
 
-    /*ListMap(cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.numInFlightReqs,curEle._2.lastUsed))(Ordering[(Int,Long)].reverse): _*).keys().foreach{
-      curInvoker =>
-      logging.info(this,s"\t <avs_debug> <CBGetUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} was the invoker used at ${cmplxLastInstUsed(curInvoker).lastUsed} and had #inflight-reqs: ${cmplxLastInstUsed(curInvoker).numInFlightReqs}")
-    }*/
+  def getUsedInvoker(): Option[InvokerInstanceId] = {
 
     ListMap(lastInstantUsed.toSeq.sortWith(_._2 > _._2):_*).keys.foreach{
       curInvoker => 
@@ -247,7 +244,6 @@ class ActionStats(val actionName:String,logging: Logging){
         case Some(curInvokerStats) => 
           logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
           // If I fit, I will choose this.
-          // TODO: Change this so that I iterate based on some "ranking"
           val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
           if(decision){
             var curInstant: Long = Instant.now.toEpochMilli
@@ -267,7 +263,47 @@ class ActionStats(val actionName:String,logging: Logging){
     logging.info(this,s"\t <avs_debug> <getUsedInvoker> Action: ${actionName} did not get a used invoker :( :( ")
     None
 
-  } 
+  }
+
+  def isProactiveNeeded(invoker: InvokerInstanceId): (InvokerInstanceId,Boolean) = {
+    val tempTimeSortedInvokers = ListMap(lastInstantUsed.toSeq.sortWith(_._2 > _._2):_*)
+    val timeSortedInvokers = tempTimeSortedInvokers.keys.toList
+    var arrIdx = -1
+
+    timeSortedInvokers.foreach{
+      curInvoker =>
+      arrIdx+=1 
+      logging.info(this,s"\t <avs_debug> <IPN> Action: ${actionName}, invoker: ${curInvoker.toInt} was the invoker used at ${lastInstantUsed(curInvoker)}")
+      usedInvokers.get(curInvoker) match {
+        case Some(curInvokerStats) => 
+          logging.info(this,s"\t <avs_debug> <IPN> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
+          // If I fit, I will choose this.
+          val decision = curInvokerStats.checkInvokerActTypeOpZone(actionName)
+          
+          if(decision){ 
+            val toBeUsedIdx = arrIdx+1
+            if(toBeUsedIdx< timeSortedInvokers.size){
+              val nextInvoker = timeSortedInvokers(toBeUsedIdx)
+              logging.info(this,s"\t <avs_debug> <IPN> 1.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont spawning in nextInvoker: ${nextInvoker} ")  
+              return (nextInvoker,decision)
+            }else{
+              logging.info(this,s"\t <avs_debug> <IPN> 2.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont but size of timeSortedInvokers is ${timeSortedInvokers.size}")  
+              // anyway won't spawn an invoker..
+              return (curInvoker,false)
+            }
+          }
+          else{
+            logging.info(this,s"\t <avs_debug> <IPN> 3.0 Invoker: ${curInvoker.toInt} supposedly does NOT and size of timeSortedInvokers: ${timeSortedInvokers.size}")  
+            // anyway won't spawn an invoker..
+            return (curInvoker,false)
+          }
+        case None =>
+          logging.info(this,s"\t <avs_debug> <IPN> 4.0 Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
+      }
+    }
+    // anyway won't spawn an invoker..
+    (invoker,false)
+  }
 
   def getActiveInvoker(activeInvokers: ListBuffer[InvokerHealth]): Option[InvokerInstanceId] = {
     activeInvokers.foreach{
@@ -351,6 +387,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   var warningZoneThd:Double = 0.5
   var maxProactiveNumConts: Int = 2
   var curNumProcactiveConts: Int = 0
+  var lastTime_ProactivelySpawned: Long = Instant.now.toEpochMilli
   // -------------- Thresholds --------------
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
@@ -494,12 +531,17 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       curNumProcactiveConts = 0
       logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} both conditions are neutralized, resetting curNumProcactiveConts: ${curNumProcactiveConts}")
     }
-    if(curNumProcactiveConts>maxProactiveNumConts){
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 4. invoker: ${id.toInt} maxed out with proactivism, since curNumProcactiveConts: ${curNumProcactiveConts} is larger than maxProactiveNumConts")
+
+    var timeSinceLastProactive = (Instant.now.toEpochMilli - lastTime_ProactivelySpawned)
+    if( (curNumProcactiveConts>maxProactiveNumConts) || (timeSinceLastProactive < statsTimeoutInMilli)){
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 4. invoker: ${id.toInt} maxed out with proactivism, since curNumProcactiveConts: ${curNumProcactiveConts} is larger than maxProactiveNumConts timeSinceLastProactive: ${timeSinceLastProactive} and lastProactiveIssue: ${lastTime_ProactivelySpawned}")
       retVal = false
     }
-    //retVal 
-    false
+
+    if(retVal){
+      lastTime_ProactivelySpawned = Instant.now.toEpochMilli
+    }
+    retVal 
   }
 
   def canDummyReqBeIssued(actionName: String): Boolean = {
@@ -563,10 +605,10 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         // ok, I don't have too many pending requests here..
 
         // If I don't have any more containers (myTypeConts==0) of my type, I will try not to accept utmost 1 request!
-        if( (myTypeConts==0) && (inFlightReqsByType(actType) > myTypeConts) ){
+        /*if( (myTypeConts==0) && (inFlightReqsByType(actType) > myTypeConts) ){
          logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-0.5> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
           retVal = false
-        }
+        }*/
         if( (myTypeConts < myResources.numCores) ){
           logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
           // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.

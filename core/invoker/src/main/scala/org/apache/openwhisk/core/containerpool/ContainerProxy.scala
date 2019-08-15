@@ -617,7 +617,7 @@ class ContainerProxy(
             None,
             Interval.zero,
             false,
-            ActivationResponse.developerError("{}")) )         
+            ActivationResponse.success(None)))         
         }else{
           logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} IS NOT proactiveSpawning"); //avs 
         // avs --end

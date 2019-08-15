@@ -296,11 +296,15 @@ class AdaptiveContainerPoolBalancer(
           s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to (schedule) $invoker and toUseProactiveInvokerId: ${toUseProactiveInvokerId}")        
 
         // avs --begin
-        proactiveBegin = Instant.now.toEpochMilli
-        if(checkInvokerOpZone(invoker,action.name.asString)){
+        proactiveBegin = Instant.now.toEpochMilli        
+        //if(checkInvokerOpZone(invoker,action.name.asString)){
+        val (proactiveInvoker,needToSpawnProactiveInvoker) = actStats_checkInvokerOpZone(invoker,action.name.asString)
+        if(needToSpawnProactiveInvoker){
           // should make logic more sensible  -- should allow dummy req only if inFlightReqs are less than max. If this invoker doesn't fit, issue it to next one maybe? 
-          val proactiveInvoker: InvokerHealth = schedulingState.managedInvokers(toUseProactiveInvokerId)
-          if(canIssueDummyReqToInvoker(proactiveInvoker.id,action.name.asString)){
+          //val proactiveInvoker: InvokerHealth = schedulingState.managedInvokers(toUseProactiveInvokerId)
+
+          if(canIssueDummyReqToInvoker(proactiveInvoker,action.name.asString)){
+
             val proactiveMsg = ActivationMessage(
               // Use the sid of the InvokerSupervisor as tid
               transid = transid,
@@ -316,14 +320,20 @@ class AdaptiveContainerPoolBalancer(
               proactiveSpawning = true
             )
 
-            schedulingState.curInvokerPoolMaintenance.makeInvokerActive(proactiveInvoker)
-            val proActiveResult = setupActivation(proactiveMsg, action, proactiveInvoker.id)
-            sendActivationToInvoker(messageProducer, proactiveMsg, proactiveInvoker.id).map(_ => proActiveResult)          
+            if(proactiveInvoker.toInt < schedulingState.managedInvokers.size){
+              val tempInvoker_toMakeActive: InvokerHealth = schedulingState.managedInvokers(proactiveInvoker.toInt)
+              schedulingState.curInvokerPoolMaintenance.makeInvokerActive(tempInvoker_toMakeActive)
+            }else{
+              logging.info(this,s"<avs_debug> <ProContSpawn> ERROR: CurActivation: ${msg.activationId} wants to issue a new activation: ${proactiveMsg.activationId} to invoker: ${proactiveInvoker.toInt} but it's not found in managedInvokers!! HANDLE it..")                        
+            }            
+            
+            val proActiveResult = setupActivation(proactiveMsg, action, proactiveInvoker)
+            sendActivationToInvoker(messageProducer, proactiveMsg, proactiveInvoker).map(_ => proActiveResult)          
             endInstant = Instant.now.toEpochMilli // avs
             
             logging.info(this,s"<avs_debug> <ProContSpawn> 1.0 CurActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId} (end-proactiveBegin): ${endInstant-proactiveBegin} end: ${endInstant} proactiveBegin: ${proactiveBegin}")            
           }else{
-            logging.info(this,s"<avs_debug> <ProContSpawn> 1.1 Want to issue a dummy req but, invoker: {toUseProactiveInvokerId} cannot accommodate a new request! ")            
+            logging.info(this,s"<avs_debug> <ProContSpawn> 1.1 Want to issue a dummy req but, invoker: ${toUseProactiveInvokerId} cannot accommodate a new request! ")            
           }
         }else{
           logging.info(this,s"<avs_debug> <ProContSpawn> 2.0 activation: ${msg.activationId}")

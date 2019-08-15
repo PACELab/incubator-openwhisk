@@ -407,6 +407,20 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
       }     
   }
 
+  def actStats_checkInvokerOpZone(invoker: InvokerInstanceId,actionName: String): (InvokerInstanceId,Boolean) = {
+    curRunningActions.get(actionName) match {
+      case Some(curActStats) => 
+        logging.info(this,s"<avs_debug> <as_cio> action: ${actionName} is PRESENT in curRunningActions")
+        curActStats.isProactiveNeeded(invoker)
+      case None => 
+        logging.info(this,s"<avs_debug> <as_cio> action: ${actionName} is ABSENT in curRunningActions")
+        
+        curRunningActions = curRunningActions + (actionName-> new ActionStats(actionName,logging))
+        var myActStats :ActionStats = curRunningActions(actionName)
+        myActStats.isProactiveNeeded(invoker)
+    }
+  }
+
   type cicType = (InvokerHealth,String) => Boolean
   val cIC: cicType = (invoker: InvokerHealth,actionName:String) => {
     //def checkInvokerCapacity(invoker: InvokerInstanceId): Boolean = {
