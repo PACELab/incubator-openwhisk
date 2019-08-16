@@ -265,7 +265,7 @@ class ActionStats(val actionName:String,logging: Logging){
 
   }
 
-  def isProactiveNeeded(invoker: InvokerInstanceId): (InvokerInstanceId,Boolean) = {
+  def isProactiveNeeded(invoker: InvokerInstanceId): (InvokerInstanceId,Int,Boolean) = {
     val tempTimeSortedInvokers = ListMap(lastInstantUsed.toSeq.sortWith(_._2 > _._2):_*)
     val timeSortedInvokers = tempTimeSortedInvokers.keys.toList
     var arrIdx = -1
@@ -278,31 +278,32 @@ class ActionStats(val actionName:String,logging: Logging){
         case Some(curInvokerStats) => 
           logging.info(this,s"\t <avs_debug> <IPN> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
           // If I fit, I will choose this.
-          val decision = curInvokerStats.checkInvokerActTypeOpZone(actionName)
+          val (curInvokerNumContsToSpawn,decision) = curInvokerStats.checkInvokerActTypeOpZone(actionName)
           
           if(decision){ 
             val toBeUsedIdx = arrIdx+1
+
             if(toBeUsedIdx< timeSortedInvokers.size){
               val nextInvoker = timeSortedInvokers(toBeUsedIdx)
-              logging.info(this,s"\t <avs_debug> <IPN> 1.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont spawning in nextInvoker: ${nextInvoker} ")  
-              return (nextInvoker,decision)
+              logging.info(this,s"\t <avs_debug> <IPN> 1.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont spawning in nextInvoker: ${nextInvoker} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+              return (nextInvoker,curInvokerNumContsToSpawn,decision)
             }else{
               logging.info(this,s"\t <avs_debug> <IPN> 2.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont but size of timeSortedInvokers is ${timeSortedInvokers.size}")  
               // anyway won't spawn an invoker..
-              return (curInvoker,false)
+              return (curInvoker,0,false)
             }
           }
           else{
             logging.info(this,s"\t <avs_debug> <IPN> 3.0 Invoker: ${curInvoker.toInt} supposedly does NOT and size of timeSortedInvokers: ${timeSortedInvokers.size}")  
             // anyway won't spawn an invoker..
-            return (curInvoker,false)
+            return (curInvoker,0,false)
           }
         case None =>
           logging.info(this,s"\t <avs_debug> <IPN> 4.0 Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
       }
     }
     // anyway won't spawn an invoker..
-    (invoker,false)
+    (invoker,0,false)
   }
 
   def getActiveInvoker(activeInvokers: ListBuffer[InvokerHealth]): Option[InvokerInstanceId] = {
@@ -387,7 +388,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   var warningZoneThd:Double = 0.5
   var maxProactiveNumConts: Int = 2
   var curNumProcactiveConts: Int = 0
-  var lastTime_ProactivelySpawned: Long = Instant.now.toEpochMilli
+  var lastTime_ProactivelySpawned: Long = 0 //Instant.now.toEpochMilli
   // -------------- Thresholds --------------
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
@@ -418,6 +419,11 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var myActType = getActionType(toAddAction);
     var myStandaloneRuntime = getFunctionRuntime(toAddAction)
     logging.info(this,s"\t <avs_debug> <AIS:addAction> Action: ${toAddAction} is of type: ${myActType} and runtime: ${myStandaloneRuntime}")
+  }
+
+  def getMyMaxInFlightReqs(toCheckAction: String): Double= {
+    var actType = getActionType(toCheckAction)
+    maxInFlightReqsByType(actType)
   }
 
   def updateActionStats(toUpdateAction:String, latencyVal: Long,initTime: Long, toUpdateNumConts:Int):Unit = {
@@ -510,7 +516,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     inFlightReqsByType("ET")+inFlightReqsByType("MP")
   }
 
-  def checkInvokerActTypeOpZone(actionName: String): Boolean ={
+  /*def checkInvokerActTypeOpZone(actionName: String): Boolean = {
     var actType = getActionType(actionName)  
     //updateActTypeStats()
     var (myConts,status_opZone) = findActionNumContsOpZone(actionName)
@@ -542,14 +548,69 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       lastTime_ProactivelySpawned = Instant.now.toEpochMilli
     }
     retVal 
+  }*/
+
+  def checkInvokerActTypeOpZone(actionName: String): (Int,Boolean) ={
+    var actType = getActionType(actionName)  
+    //updateActTypeStats()
+    var (myConts,status_opZone) = findActionNumContsOpZone(actionName)
+    var myTypeConts = numConts(actType)  
+
+    var nextInvokerSpawnDecision: Boolean = false
+    var curInvokerSpawnDecision: Boolean = false
+    var curInvokerNumContsToSpawn = 0
+
+    //logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 0. invoker: ${id.toInt} action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone}  inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} maxInFlightReqsByType(actType): ${maxInFlightReqsByType(actType)}  curNumProcactiveConts: ${curNumProcactiveConts}")
+    var timeSinceLastProactive = (Instant.now.toEpochMilli - lastTime_ProactivelySpawned)
+
+    if( (myTypeConts==0) && (inFlightReqsByType(actType)==1) ){
+      nextInvokerSpawnDecision = true
+
+      if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
+        curInvokerSpawnDecision = true
+        curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts
+      }
+
+      lastTime_ProactivelySpawned = Instant.now.toEpochMilli
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerSpawnDecision: ${curInvokerSpawnDecision}")  
+    }else if(timeSinceLastProactive >= statsTimeoutInMilli){
+      nextInvokerSpawnDecision = true
+
+      if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
+        curInvokerSpawnDecision = true
+        curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts
+      }      
+
+      lastTime_ProactivelySpawned = Instant.now.toEpochMilli
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerSpawnDecision: ${curInvokerSpawnDecision}")  
+    }else{
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerSpawnDecision: ${curInvokerSpawnDecision}")  
+    }
+    (curInvokerNumContsToSpawn,nextInvokerSpawnDecision)
   }
 
-  def canDummyReqBeIssued(actionName: String): Boolean = {
-    
+  def canDummyReqBeIssued(actionName: String,numDummyReqs: Int): (Int,Boolean) = {
+    // TODO: Change it to #conts instead of inFlightReqsByType?
     var actType = getActionType(actionName)
     var retVal: Boolean = false
+    var adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt )
+    updateActTypeStats()
+    var myTypeConts = numConts(actType)  
 
-    if(inFlightReqsByType(actType) < maxInFlightReqsByType(actType)){
+    if(adjustedDummyReqs == 0 ){
+      retVal = false
+      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 1. A dummy action of ${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
+    }else if(myTypeConts<= inFlightReqsByType(actType)){
+      // so there is some space for requests & containers.!
+      retVal = true      
+      adjustedDummyReqs = if(adjustedDummyReqs > numDummyReqs) numDummyReqs else adjustedDummyReqs
+      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 2. A dummy action of ${id.toInt} WILL be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+    }else{
+      retVal = false
+      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 3. A dummy action of ${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+    }
+    (adjustedDummyReqs,retVal)
+    /*if( inFlightReqsByType(actType) <= maxInFlightReqsByType(actType) ){
       inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
       logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 1. A dummy action of ${id.toInt} shall be issued.. in invoker: ${id.toInt}. Updating inFlightReqsByType to ${inFlightReqsByType(actType)}")
       retVal = true
@@ -557,7 +618,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 2. A dummy action of ${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
       retVal = false
     }
-    retVal
+    retVal*/
   }
 
   def capacityRemaining(actionName:String): (Int,Boolean) = { // should update based on -- memory; #et, #mp and operating zone
