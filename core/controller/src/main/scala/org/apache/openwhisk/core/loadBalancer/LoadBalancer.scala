@@ -151,14 +151,22 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
     // EXPT-WARNING: Might be better to issue a load request and refresh stats!, instead of resetting willy nilly!
     if(statsResetFlag && opZone != opZoneUnSafe){
       logging.info(this,s"\t <avs_debug> <ASPI:resetStats> action: ${actionName}, myInvokerID: ${myInvokerID} has passed statsResetFlag: ${statsResetFlag} but opZone is ${opZone} not unsafe, not doing anything..")       
-    }else{
-      logging.info(this,s"\t <avs_debug> <ASPI:resetStats> action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats since: curTime: ${curTime} is larger than lastUpdated: ${lastUpdated} by ${statsTimeoutInMilli} or ${statsResetTimeout} opZone: ${opZone}") 
+    }else{      
+      val prevOpZone = opZone
+      if(statsResetFlag && opZone == opZoneUnSafe){
+        numConts = 1
+      }else{
+        numConts = 0
+      }
+
       opZone = 0 
       movingAvgLatency = 0
-      numConts = 0
       cumulSum = 0
       runningCount = 0
+    
       lastUpdated = Instant.now.toEpochMilli        
+      logging.info(this,s"\t <avs_debug> <ASPI:resetStats> action: ${actionName}, myInvokerID: ${myInvokerID} resetting my stats at lastUpdated: ${lastUpdated} and statsResetFlag: ${statsResetFlag} and prevOpZone: ${prevOpZone}") 
+      
     }
     
   }
@@ -568,23 +576,23 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
       if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
         curInvokerSpawnDecision = true
-        curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts
+        curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts - inFlightReqsByType(actType)
       }
 
       lastTime_ProactivelySpawned = Instant.now.toEpochMilli
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerSpawnDecision: ${curInvokerSpawnDecision}")  
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }else if(timeSinceLastProactive >= statsTimeoutInMilli){
       nextInvokerSpawnDecision = true
 
       if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
         curInvokerSpawnDecision = true
-        curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts
+        curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts - inFlightReqsByType(actType)
       }      
 
       lastTime_ProactivelySpawned = Instant.now.toEpochMilli
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerSpawnDecision: ${curInvokerSpawnDecision}")  
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }else{
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerSpawnDecision: ${curInvokerSpawnDecision}")  
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }
     (curInvokerNumContsToSpawn,nextInvokerSpawnDecision)
   }
@@ -593,23 +601,27 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     // TODO: Change it to #conts instead of inFlightReqsByType?
     var actType = getActionType(actionName)
     var retVal: Boolean = false
-    var adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt )
+
     updateActTypeStats()
     var myTypeConts = numConts(actType)  
+    var adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt - myTypeConts)
 
     if(adjustedDummyReqs == 0 ){
+      // no space available yo! 
       retVal = false
-      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 1. A dummy action of ${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
-    }else if(myTypeConts<= inFlightReqsByType(actType)){
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 1. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
+    }else if(myTypeConts<= maxInFlightReqsByType(actType)){
       // so there is some space for requests & containers.!
       retVal = true      
       adjustedDummyReqs = if(adjustedDummyReqs > numDummyReqs) numDummyReqs else adjustedDummyReqs
-      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 2. A dummy action of ${id.toInt} WILL be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2. A dummy action to invoker-${id.toInt} WILL be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
     }else{
       retVal = false
-      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 3. A dummy action of ${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 3. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
     }
+    if(adjustedDummyReqs > 0 ) inFlightReqsByType(actType)+=adjustedDummyReqs
     (adjustedDummyReqs,retVal)
+
     /*if( inFlightReqsByType(actType) <= maxInFlightReqsByType(actType) ){
       inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
       logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 1. A dummy action of ${id.toInt} shall be issued.. in invoker: ${id.toInt}. Updating inFlightReqsByType to ${inFlightReqsByType(actType)}")
@@ -621,6 +633,16 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     retVal*/
   }
 
+  def issuedSomeDummyReqs(actionName: String, issuedNumDummyReqs: Int): Unit = {
+    var actType = getActionType(actionName)
+    inFlightReqsByType(actType)+=issuedNumDummyReqs
+    if( inFlightReqsByType(actType) > maxInFlightReqsByType(actType) ){
+      logging.info(this,s"\t <avs_debug> <AIS:issueDummyReq> 1. DANGER DANGER In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} are more than the maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
+    }else{
+      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 2. ALL-COOL In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} is less than maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
+    }
+  }
+  
   def capacityRemaining(actionName:String): (Int,Boolean) = { // should update based on -- memory; #et, #mp and operating zone
     // 1. Check action-type. Alternatively, can send this as a parameter from the schedule-method
     // 2. Check whether we can accommodate this actionType (ET vs MP)? 
@@ -665,17 +687,12 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
         // ok, I don't have too many pending requests here..
 
-        // If I don't have any more containers (myTypeConts==0) of my type, I will try not to accept utmost 1 request!
-        /*if( (myTypeConts==0) && (inFlightReqsByType(actType) > myTypeConts) ){
-         logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-0.5> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-          retVal = false
-        }*/
         if( (myTypeConts < myResources.numCores) ){
           logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
           // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.
           // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
           retVal = true
-        }else if( myTypeConts <= inFlightReqsByType(actType) ){
+        }else if( myTypeConts <= maxInFlightReqsByType(actType) ){
           logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
           // we have maxed out, making sure everybody is safe atleast.
           var myActTypeOpZone = actionTypeOpZone("ET")

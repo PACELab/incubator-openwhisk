@@ -377,6 +377,21 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     } 
   }
 
+  def issuedSomeDummyReqs(invoker: InvokerInstanceId,actionName:String,numContsSpawnedInMyInvoker: Int): Unit = {
+    logging.info(this,s"<avs_debug> <ISDR> on invoker: ${invoker.toInt}")
+    allInvokers.get(invoker) match {
+      case Some(curInvokerStats) =>
+        logging.info(this,s"<avs_debug> in <ISDR> invoker: ${invoker.toInt} is PRESENT in allInvokers ")
+        curInvokerStats.issuedSomeDummyReqs(actionName,numContsSpawnedInMyInvoker)
+      case None =>
+        allInvokers = allInvokers + (invoker -> new AdapativeInvokerStats(invoker,InvokerState.Healthy,logging) )
+        logging.info(this,s"<avs_debug> in <ISDR> invoker: ${invoker.toInt} is ABSENT in allInvokers ")
+        var tempInvokerStats = allInvokers(invoker)
+        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+        tempInvokerStats.issuedSomeDummyReqs(actionName,numContsSpawnedInMyInvoker)
+      }    
+  }
+
   def canIssueDummyReqToInvoker(invoker: InvokerInstanceId,actionName:String,numDummyReqsToIssue: Int): (Int,Boolean) ={
     logging.info(this,s"<avs_debug> <CIDRTI> on invoker: ${invoker.toInt}")
     allInvokers.get(invoker) match {

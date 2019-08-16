@@ -295,6 +295,9 @@ class AdaptiveContainerPoolBalancer(
           this,
           s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to (schedule) $invoker and toUseProactiveInvokerId: ${toUseProactiveInvokerId}")        
 
+        val activationResult = setupActivation(msg, action, invoker)
+        val origActivMetadata = sendActivationToInvoker(messageProducer, msg, invoker).map(_ => activationResult)
+
         // avs --begin
         proactiveBegin = Instant.now.toEpochMilli        
         //if(checkInvokerOpZone(invoker,action.name.asString)){
@@ -332,11 +335,11 @@ class AdaptiveContainerPoolBalancer(
               }
               val proActiveResult = setupActivation(proactiveMsg, action, proactiveInvoker)
               sendActivationToInvoker(messageProducer, proactiveMsg, proactiveInvoker).map(_ => proActiveResult)          
-              logging.info(this,s"<avs_debug> <ProContSpawn> 1.0 curIter: ${curIter} myInvoker: ${invoker.toInt} CurActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId}")            
+              logging.info(this,s"<avs_debug> <ProContSpawn> 1.0 curIter: ${curIter} curActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId} in invoker: ${proactiveInvoker.toInt}")            
             }
 
           }else{
-            logging.info(this,s"<avs_debug> <ProContSpawn> 1.1 myInvoker: ${invoker.toInt}  Want to issue a dummy req but, invoker: ${toUseProactiveInvokerId} cannot accommodate a new request! ")            
+            logging.info(this,s"<avs_debug> <ProContSpawn> 1.1 myInvoker: ${invoker.toInt} and curActivation: ${msg.activationId} wants to issue a dummy req but, invoker: ${toUseProactiveInvokerId} cannot accommodate a new request! ")            
           }
 
           if(numContsToSpawnInMyInvoker>0){
@@ -364,6 +367,9 @@ class AdaptiveContainerPoolBalancer(
               logging.info(this,s"<avs_debug> <ProContSpawn> 1.6 curIter: ${curIter} myInvoker: ${invoker.toInt} CurActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId}")            
             }
 
+            if(numContsToSpawnInMyInvoker>0)
+              issuedSomeDummyReqs(invoker,action.name.asString,numContsToSpawnInMyInvoker)
+
           }
 
           endInstant = Instant.now.toEpochMilli // avs
@@ -378,9 +384,7 @@ class AdaptiveContainerPoolBalancer(
         //logging.info(this,s"<avs_debug> <ProContSpawn> If issued a new activation, it'd be given id.: ${proactiveMsg.activationId} (end-proactiveBegin): ${endInstant-proactiveBegin} end: ${endInstant} proactiveBegin: ${proactiveBegin}")
         // avs --end
 
-        val activationResult = setupActivation(msg, action, invoker)
-        sendActivationToInvoker(messageProducer, msg, invoker).map(_ => activationResult)
-
+        origActivMetadata 
       }
       .getOrElse {
         // report the state of all invokers
