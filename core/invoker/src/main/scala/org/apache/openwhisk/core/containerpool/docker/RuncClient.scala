@@ -58,10 +58,12 @@ class RuncClient(timeouts: RuncClientTimeouts = loadConfigOrThrow[RuncClientTime
   protected val runcCmd: Seq[String] = Seq("/usr/bin/docker-runc")
 
   def pause(id: ContainerId)(implicit transid: TransactionId): Future[Unit] =
-    runCmd(Seq("pause", id.asString), timeouts.pause).map(_ => ())
+    //runCmd(Seq("pause", id.asString), timeouts.pause).map(_ => ())
+    runCmd(Seq("ps", id.asString), timeouts.resume).map(_ => ()) // avs: hack to check whether a proactively spawned container will be considered if it is not actually paused?
 
   def resume(id: ContainerId)(implicit transid: TransactionId): Future[Unit] =
-    runCmd(Seq("resume", id.asString), timeouts.resume).map(_ => ())
+    //runCmd(Seq("resume", id.asString), timeouts.resume).map(_ => ())
+    runCmd(Seq("ps", id.asString), timeouts.resume).map(_ => ()) // avs: hack to check whether a proactively spawned container will be considered if it is not actually paused?
 
   // avs --start
   def updateCpuShares(id: ContainerId,ipTransid: TransactionId,cpuShares: Int): Future[Unit] = {

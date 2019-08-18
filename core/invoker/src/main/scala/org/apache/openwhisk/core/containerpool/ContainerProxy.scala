@@ -326,6 +326,7 @@ class ContainerProxy(
   when(Starting) {
     // container was successfully obtained
     case Event(completed: PreWarmCompleted, _) =>
+      logging.info(this, s" <avs_debug> <cproxy:Starting>")
       context.parent ! NeedWork(completed.data)
       goto(Started) using completed.data
 
@@ -361,22 +362,28 @@ class ContainerProxy(
     // Init was successful
     case Event(data: WarmedData, _: PreWarmedData) =>
       //in case concurrency supported, multiple runs can begin as soon as init is complete
+      logging.info(this, s" <avs_debug> <cproxy:running:NeedWork> container ${data.container}; ${activeCount} activations in flight needs work..")
       context.parent ! NeedWork(data)
       stay using data
 
     // Run was successful
     case Event(RunCompleted, data: WarmedData) =>
       activeCount -= 1
+      // avs --begin
       //context.parent ! UpdateStats(numActivationsServed) //avs 
       //if(prevActivationInitTime == 0) 
+      logging.info(this, s" <avs_debug> <cproxy:running:runComplt> container ${data.container}; ${activeCount} activations in will be updating work.. BTW my actionName: ${data.action.name} invoc-name: ${data.invocationNamespace}")
       context.parent ! UpdateStats(data.action.name.asString,prevActivationInitTime,prevActivationControllerID,prevActivationTime) //avs 
       prevActivationTime = 0;//avs
       prevActivationInitTime = 0// avs
       prevActivationWaitTime = 0 //avs
+      // avs --end
       //if there are items in runbuffer, process them if there is capacity, and stay; otherwise if we have any pending activations, also stay
       if (requestWork(data) || activeCount > 0) {
+        logging.info(this, s" <avs_debug> <cproxy:running:runComplt> container ${data.container};will stay using data")
         stay using data
       } else {
+        logging.info(this, s" <avs_debug> <cproxy:running:runComplt> container ${data.container};will go to Ready")
         goto(Ready) using data
       }
 
@@ -420,31 +427,42 @@ class ContainerProxy(
       implicit val transid = job.msg.transid
       activeCount += 1
 
+      logging.info(this, s" <avs_debug> <cproxy:Ready> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}")
       initializeAndRun(data.container, job)
         .map(_ => RunCompleted)
         .pipeTo(self)
 
+      logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will go to run..")
       goto(Running) using data
 
     // pause grace timed out
     case Event(StateTimeout, data: WarmedData) =>
+      logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will go to suspend..")
       data.container.suspend()(TransactionId.invokerNanny).map(_ => ContainerPaused).pipeTo(self)
       goto(Pausing)
 
-    case Event(Remove, data: WarmedData) => destroyContainer(data.container,data.action.name.asString)
+    case Event(Remove, data: WarmedData) => 
+      logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will be removed..")
+      destroyContainer(data.container,data.action.name.asString)
   }
 
   when(Pausing) {
-    case Event(ContainerPaused, data: WarmedData)   => goto(Paused)
-    case Event(_: FailureMessage, data: WarmedData) => destroyContainer(data.container,data.action.name.asString)
+    case Event(ContainerPaused, data: WarmedData)   => 
+      logging.info(this, s" <avs_debug> <cproxy:Pausing> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
+      goto(Paused)
+    case Event(_: FailureMessage, data: WarmedData) => 
+      logging.info(this, s" <avs_debug> <cproxy:Pausing> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
+      destroyContainer(data.container,data.action.name.asString)
     case _                                          => delay
   }
 
   when(Paused, stateTimeout = unusedTimeout) {
+    //logging.info(this, s" <avs_debug> <cproxy:Paused> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
     case Event(job: Run, data: WarmedData) =>
       implicit val transid = job.msg.transid
       activeCount += 1
 
+      logging.info(this, s" <avs_debug> <cproxy:Paused> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
       data.container
         .resume()
         .andThen {
@@ -463,6 +481,7 @@ class ContainerProxy(
 
     // container is reclaimed by the pool or it has become too old
     case Event(StateTimeout | Remove, data: WarmedData) =>
+      logging.info(this, s" <avs_debug> <cproxy:Paused> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Toreschedule yo! ")
       rescheduleJob = true // to supress sending message to the pool and not double count
       destroyContainer(data.container,data.action.name.asString)
   }
@@ -498,6 +517,7 @@ class ContainerProxy(
           self ! run
           true
         case _ =>
+          logging.info(this, s" <avs_debug> <cproxy:requestWork> container ${newData.container}; hasCap: ${newData.hasCapacity()} activActivations: ${newData.activeActivationCount} activations in flight needs work..")
           context.parent ! NeedWork(newData)
           false
       }
@@ -608,19 +628,19 @@ class ContainerProxy(
           "deadline" -> (Instant.now.toEpochMilli + actionTimeout.toMillis).toString.toJson)
 
         // avs --begin
-        if(job.msg.proactiveSpawning){
+        /*if(job.msg.proactiveSpawning){
           logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} is proactiveSpawning"); //avs 
           logging.info(this, s"<initializeAndRun> caught expected proactiveSpawning while running activation: ${job.msg.activationId} of action: ${job.action.name}. Won't Run anything here..")
-          //val dummyJsVal: JsValue = {"msg":"Was proactiveSpawning!"}
           Future.successful(ContainerProxy.constructWhiskActivation(
             job,
             None,
             Interval.zero,
             false,
             ActivationResponse.success(None)))         
-        }else{
+        }
+        //else{
           logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} IS NOT proactiveSpawning"); //avs 
-        // avs --end
+        // avs --end*/
         container
           .run(
             parameters,
@@ -639,7 +659,7 @@ class ContainerProxy(
                 runInterval.duration >= actionTimeout,
                 response)
           }
-        }
+        //}
       }
       .recover {
         case InitializationError(interval, response) =>

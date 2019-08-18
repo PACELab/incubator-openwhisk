@@ -642,7 +642,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 2. ALL-COOL In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} is less than maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
     }
   }
-  
+
   def capacityRemaining(actionName:String): (Int,Boolean) = { // should update based on -- memory; #et, #mp and operating zone
     // 1. Check action-type. Alternatively, can send this as a parameter from the schedule-method
     // 2. Check whether we can accommodate this actionType (ET vs MP)? 
@@ -657,71 +657,15 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var myTypeConts = numConts(actType)  
 
     logging.info(this,s"\t <avs_debug> <AIS:capRem> 0. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
+    logging.info(this,s"\t <avs_debug> <AIS:capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
 
-    if(actType == "MP"){
-
-      logging.info(this,s"\t <avs_debug> <AIS:capRem> 1. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} and myTypeConts: ${myTypeConts} ")
-
-      if( (inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe)) {
-        // Ok, I can accommodate atleast one request..
-        logging.info(this,s"\t <avs_debug> <AIS:capRem> <MP-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-        if( (myTypeConts < myResources.numCores)){
-          // ok, even if I need one more container, it can be fit in, I guess!
-          // Even if there is space, if I am in unsafe region, I will go somewhere else (EXPT-WARNING: this will likely make me use more machines!)
-          // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
-          logging.info(this,s"\t <avs_debug> <AIS:capRem> <MP-1.1> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-          retVal = true                     
-        }else if((myTypeConts == myResources.numCores) && (myConts!=0) && (status_opZone == opZoneSafe)){
-          // ok, I have atleast one container, and all of them are in safe-zone (EXPT-WARNING: this is a bit suspect).
-          logging.info(this,s"\t <avs_debug> <AIS:capRem> <MP-1.2> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-        }else{
-          logging.info(this,s"\t <avs_debug> <AIS:capRem> <MP-1.3> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} myConts: ${myConts} status_opZone: ${status_opZone}")
-          // No way JOSE!
-          retVal = false
-        }
-      }
-    }
-    else if(actType == "ET"){
-      logging.info(this,s"\t <avs_debug> <AIS:capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
-      if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
-        logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-0> myTypeConts: ${myTypeConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-        // ok, I don't have too many pending requests here..
-
-        if( (myTypeConts < myResources.numCores) ){
-          logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-          // ok, I have atleast one of my own containers (and not in unsafe region) and atmost as many containers as numCores.
-          // (EXPT-WARNING: Am also sending a request, if it is in warning zone -- this could hurt the latency SLO)
-          retVal = true
-        }else if( myTypeConts <= maxInFlightReqsByType(actType) ){
-          logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
-          // we have maxed out, making sure everybody is safe atleast.
-          var myActTypeOpZone = actionTypeOpZone("ET")
-          if( myActTypeOpZone <= opZoneWarn){ // WARNING: by checking for maxOpZone to be safe, it already covers by own operating type.
-            logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-2.1> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myActTypeOpZone: ${myActTypeOpZone} ")
-            // EXPT-WARNING: This could make me use a new machine, during init-zone of the experiments..
-            retVal = true
-          }else{ // Likely atleast one of them is in warning atleast
-            if( (myConts!=0) && (status_opZone!= opZoneUnSafe) ){
-              logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-2.2> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} myActTypeOpZone: ${myActTypeOpZone} ")
-              // I have atleast one container and it is atmost in warning zone, so will allow it..
-              retVal = true
-            }else{
-              logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-2.2-Inv> myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} myActTypeOpZone: ${myActTypeOpZone} ")
-              // this doesn't look good bro, so will just not accept this request!
-              retVal = false  
-            }
-            retVal = false
-          }
-        }else{
-          logging.info(this,s"\t <avs_debug> <AIS:capRem> <ET-2-Inv> invoker: ${id.toInt} maxInFlightReqsByType(ET): ${maxInFlightReqsByType(actType)} myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
-          // No way JOSE! Can't have > twice the num of ET containers.
-          retVal = false
-        }
-      }
-
+    if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
+      logging.info(this,s"\t <avs_debug> <AIS:capRem> myTypeConts: ${myTypeConts} myConts: ${myConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
+      // ok, I don't have too many pending requests here..
+      retVal = true
     }else{
-      logging.info(this,s"\t <avs_debug> <AIS:capRem> actType neither MP or ET, HANDLE it!")
-      // shouldn't come here, but putting it here just in case..
+      logging.info(this,s"\t <avs_debug> <AIS:capRem> invoker: ${id.toInt} maxInFlightReqsByType(ET): ${maxInFlightReqsByType(actType)} myTypeConts: ${myTypeConts} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
+      // No way JOSE!
       retVal = false
     }
     if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
