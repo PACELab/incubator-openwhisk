@@ -259,7 +259,7 @@ def processLoadMessage(bytes: Array[Byte]): Future[Unit] = Future{
           val name = msg.action.name
           val actionid = FullyQualifiedEntityName(namespace, name).toDocId.asDocInfo(msg.revision)
           val subject = msg.user.subject
-          var coreToUse = -1 // avs
+          var adaptiveCpuShares = -1 // avs
 
           logging.debug(this, s"${actionid.id} $subject ${msg.activationId}")
 
@@ -273,7 +273,7 @@ def processLoadMessage(bytes: Array[Byte]): Future[Unit] = Future{
             .flatMap { action =>
               action.toExecutableWhiskAction match {
                 case Some(executable) =>
-                  pool ! Run(executable, msg,coreToUse) // avs : added coreToUse
+                  pool ! Run(executable, msg,adaptiveCpuShares) // avs : added adaptiveCpuShares
                   Future.successful(())
                 case None =>
                   logging.error(this, s"non-executable action reached the invoker ${action.fullyQualifiedName(false)}")

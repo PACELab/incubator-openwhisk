@@ -124,7 +124,6 @@ class MesosContainerFactory(config: WhiskConfig,
                                actionImage: ExecManifest.ImageName,
                                userProvidedImage: Boolean,
                                memory: ByteSize,
-                               coresToUse: Int, //avs
                                cpuShares: Int)(implicit config: WhiskConfig, logging: Logging): Future[Container] = {
     implicit val transid = tid
     val image = if (userProvidedImage) {

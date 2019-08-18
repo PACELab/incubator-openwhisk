@@ -61,7 +61,6 @@ object DockerContainer {
   def create(transid: TransactionId,
              image: Either[ImageName, String],
              memory: ByteSize = 256.MB,
-             coreToUse: Int = -1, //avs
              cpuShares: Int = 0,
              environment: Map[String, String] = Map.empty,
              network: String = "bridge",
@@ -87,15 +86,8 @@ object DockerContainer {
 
     // NOTE: --dns-option on modern versions of docker, but is --dns-opt on docker 1.12
     val dnsOptString = if (docker.clientVersion.startsWith("1.12")) { "--dns-opt" } else { "--dns-option" }
-    // avs --begin
-    val cpusetStr = if(coreToUse > -1) "--cpuset-cpus="+coreToUse.toString else "" //avs WARNING: Should fix this, since empty string is crashing the container.
-    // avs --end
     val args = Seq(
-      // commenting these two lines
       "--cpu-shares",cpuShares.toString,
-      //"--cpu-shares="+forcedCpuShares.toString, //avs
-      //"--cpus="+cpuPct.toString, //avs
-      //cpusetStr.toString, //"--cpuset-cpus=0", // avs
       "--memory",
       s"${memory.toMB}m",
       "--memory-swap",

@@ -83,7 +83,6 @@ trait ContainerFactory {
                       actionImage: ExecManifest.ImageName,
                       userProvidedImage: Boolean,
                       memory: ByteSize,
-                      coresToUse: Int, //avs
                       cpuShares: Int)(implicit config: WhiskConfig, logging: Logging): Future[Container]
 
   /** perform any initialization */

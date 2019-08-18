@@ -165,7 +165,7 @@ case class WarmedData(override val container: Container,
 //Nothing Is changed..
 // Events received by the actor
 case class Start(exec: CodeExec[_], memoryLimit: ByteSize)
-case class Run(action: ExecutableWhiskAction, msg: ActivationMessage, var coreToUse: Int,retryLogDeadline: Option[Deadline] = None)
+case class Run(action: ExecutableWhiskAction, msg: ActivationMessage, var adaptiveCpuShares: Int,retryLogDeadline: Option[Deadline] = None)
 case object Remove
 
 // Events sent by the actor
@@ -218,7 +218,7 @@ case class getAllLatency(curActName: String,controllerID: Int)// avs should chan
  * @param pauseGrace time to wait for new work before pausing the container
  */
 class ContainerProxy(
-  factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int, Int) => Future[Container],
+  factory: (TransactionId, String, ImageName, Boolean, ByteSize, Int) => Future[Container],
   sendActiveAck: ActiveAck,
   storeActivation: (TransactionId, WhiskActivation, UserContext) => Future[Any],
   collectLogs: (TransactionId, Identity, WhiskActivation, Container, ExecutableWhiskAction) => Future[ActivationLogs],
@@ -252,7 +252,7 @@ class ContainerProxy(
         job.exec.image,
         job.exec.pull,
         job.memoryLimit,
-        -1, // avs: coreToUse not setting it for prewarming containers.
+        //-1, // avs: adaptiveCpuShares not setting it for prewarming containers.
         poolConfig.cpuShare(job.memoryLimit))
         .map(container => PreWarmCompleted(PreWarmedData(container, job.exec.kind, job.memoryLimit)))
         .pipeTo(self)
@@ -263,11 +263,7 @@ class ContainerProxy(
     case Event(job: Run, _) =>
       implicit val transid = job.msg.transid
       activeCount += 1
-      //logging.info(this, s"<avs_debug> <containerProxy> ok creating a new container then! and activeCount: ${activeCount} and coreToUse: ${job.coreToUse} and numActivationsServed: ${numActivationsServed}"); //avs
-      //val sendCpuShares =  if(job.action.name.name == "imageResizing_v1") 256 else (poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //if (memory.toMB > 128) 512 else 512
-      val sendCpuShares = poolConfig.cpuShare(job.action.limits.memory.megabytes.MB);
-
-      //val sendCpuShares =  (4*poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)); //avs
+      val sendCpuShares = if(job.adaptiveCpuShares < poolConfig.cpuShare(job.action.limits.memory.megabytes.MB)) poolConfig.cpuShare(job.action.limits.memory.megabytes.MB) else job.adaptiveCpuShares; // avs
       // create a new container
       val container = factory(
         job.msg.transid,
@@ -275,8 +271,6 @@ class ContainerProxy(
         job.action.exec.image,
         job.action.exec.pull,
         job.action.limits.memory.megabytes.MB,
-        job.coreToUse, // avs
-        //poolConfig.cpuShare(job.action.limits.memory.megabytes.MB))
         sendCpuShares)
 
       // container factory will either yield a new container ready to execute the action, or
@@ -762,7 +756,7 @@ final case class ContainerProxyTimeoutConfig(idleContainer: FiniteDuration, paus
 
 object ContainerProxy {
   def props(
-    factory: (TransactionId, String, ImageName, Boolean, ByteSize,Int, Int) => Future[Container],
+    factory: (TransactionId, String, ImageName, Boolean, ByteSize,Int) => Future[Container],
     ack: (TransactionId, WhiskActivation, Boolean, ControllerInstanceId, UUID, Boolean) => Future[Any],
     store: (TransactionId, WhiskActivation, UserContext) => Future[Any],
     collectLogs: (TransactionId, Identity, WhiskActivation, Container, ExecutableWhiskAction) => Future[ActivationLogs],

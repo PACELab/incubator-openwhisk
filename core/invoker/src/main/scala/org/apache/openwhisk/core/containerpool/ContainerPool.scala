@@ -153,10 +153,10 @@ class TrackFunctionStats(
         //myContainers = myContainers + (container -> 0) // will reset it, but doesnt matter.
     }
 
-    if(myContainers.size==0){
+    /*if(myContainers.size==0){
       logging.info(this, s"<avs_debug> <TrackFunctionStats> <removeContainer> for action: ${actionName} don't have any containers. Will reset curCpuSharesto defaultCpuShares: ${defaultCpuShares} ")
       curCpuShares = defaultCpuShares // can set this to most-used-cpu-shares
-    }
+    }*/
   }
 
 
@@ -170,6 +170,10 @@ class TrackFunctionStats(
       numConts+=1
     } 
     curCpuShares = if(numConts!=0) curBatch_minCpuShares else defaultCpuShares
+  }
+
+  def getCurCpuShares(): Int = {
+    curCpuShares
   }
 
   def accumAllCpuShares(): Int = {
@@ -424,12 +428,12 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
     val actionName = r.action.name.name
     val maxConcurrent = r.action.limits.concurrency.maxConcurrent
     val activationId = r.msg.activationId.toString
-    r.coreToUse = canUseCore //avs
+    r.adaptiveCpuShares = canUseCore //avs
 
     r.msg.transid.mark(
       this,
       LoggingMarkers.INVOKER_CONTAINER_START(containerState),
-      s"containerStart containerState: $containerState container: $container activations: $activeActivations of max $maxConcurrent action: $actionName namespace: $namespaceName activationId: $activationId and canUseCore: ${canUseCore} and r.coreToUse ${r.coreToUse}",
+      s"containerStart containerState: $containerState container: $container activations: $activeActivations of max $maxConcurrent action: $actionName namespace: $namespaceName activationId: $activationId and canUseCore: ${canUseCore} and r.adaptiveCpuShares ${r.adaptiveCpuShares}",
       akka.event.Logging.InfoLevel)
   }
 
@@ -481,8 +485,6 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                       curCpuShares = cpuSharesCheck(logging,curCpuShares,1,r.action.name.asString)
                       cpuSharesPool = cpuSharesPool + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,r.action,curCpuShares,r.msg.transid,logging))                       
                   }
-
-                  r.coreToUse = canUseCore 
                   // avs --end
 
                   takePrewarmContainer(r.action)
@@ -509,10 +511,36 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         createdContainer match {
           case Some(((actor, data), containerState)) =>
 
-            logging.info(this,s"\t <avs_debug> <findCont> Anyway, for activ: ${r.msg.activationId} using a container in state: ${containerState} ")
+            //logging.info(this,s"\t <avs_debug> <findCont> Anyway, for activ: ${r.msg.activationId} using a container in state: ${containerState} ")
             //increment active count before storing in pool map
             val newData = data.nextRun(r)
             val container = newData.getContainer
+
+            // avs --begin
+            var getAdaptiveCpuShares = 0
+            cpuSharesPool.get(r.action.name.asString) match {
+              case Some(e) => 
+                //cpuSharesPool(r.action.name.asString).dummyCall() // dummy operation
+                getAdaptiveCpuShares = cpuSharesPool(r.action.name.asString).getCurCpuShares()
+              case None => 
+                //cpuSharesPool = cpuSharesPool + (r.action.name.asString -> MutableTriplet(0,0,r.msg.transid))
+                containerStandaloneRuntime.get(r.action.name.asString) match{
+                  case Some(e) => 
+                  var tempCpuShares = poolConfig.cpuShare(r.action.limits.memory.megabytes.MB) 
+                  tempCpuShares = cpuSharesCheck(logging,tempCpuShares,1,r.action.name.asString)//,totalCpuShares)
+                  case None => 
+                    addFunctionRuntime(r.action.name.asString)
+                }
+
+                val myStandAloneRuntime = containerStandaloneRuntime(r.action.name.asString); // would have added it above, so it must be ok to access it here.
+                var curCpuShares = poolConfig.cpuShare(r.action.limits.memory.megabytes.MB) 
+                curCpuShares = cpuSharesCheck(logging,curCpuShares,1,r.action.name.asString)
+                cpuSharesPool = cpuSharesPool + (r.action.name.asString -> new TrackFunctionStats(r.action.name.asString,myStandAloneRuntime,r.action,curCpuShares,r.msg.transid,logging))                 
+                getAdaptiveCpuShares = cpuSharesPool(r.action.name.asString).getCurCpuShares()
+            }
+
+            r.adaptiveCpuShares = if(getAdaptiveCpuShares!=0) getAdaptiveCpuShares else poolConfig.cpuShare(r.action.limits.memory.megabytes.MB)
+            // avs --end
 
             if (newData.activeActivationCount < 1) {
               logging.error(this, s"invalid activation count < 1 ${newData}")
@@ -567,13 +595,13 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
             }
           
             // avs --begin
-            if(r.coreToUse == -1){
+            if(r.adaptiveCpuShares == -1){
               canUseCore = ((canUseCore+1)%4); //avs
-              r.coreToUse = canUseCore
+              r.adaptiveCpuShares = canUseCore
             }
             // avs --end
             // As this request is the first one in the buffer, try again to execute it.
-            self ! Run(r.action, r.msg, r.coreToUse, retryLogDeadline)
+            self ! Run(r.action, r.msg, r.adaptiveCpuShares, retryLogDeadline)
         }
       } else {
         // There are currently actions waiting to be executed before this action gets executed.
