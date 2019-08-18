@@ -424,7 +424,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
       }     
   }
 
-  def actStats_checkInvokerOpZone(invoker: InvokerInstanceId,actionName: String): (InvokerInstanceId,Int,Boolean) = {
+  def actStats_checkInvokerOpZone(invoker: InvokerInstanceId,actionName: String): (InvokerInstanceId,Int,Int,Boolean) = {
     curRunningActions.get(actionName) match {
       case Some(curActStats) => 
         logging.info(this,s"<avs_debug> <as_cio> action: ${actionName} is PRESENT in curRunningActions")

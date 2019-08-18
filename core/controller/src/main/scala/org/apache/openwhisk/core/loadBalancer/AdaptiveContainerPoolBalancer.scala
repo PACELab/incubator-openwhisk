@@ -301,12 +301,15 @@ class AdaptiveContainerPoolBalancer(
         // avs --begin
         proactiveBegin = Instant.now.toEpochMilli        
         //if(checkInvokerOpZone(invoker,action.name.asString)){
-        var (proactiveInvoker,numContsToSpawnInMyInvoker,needToSpawnProactiveInvoker) = actStats_checkInvokerOpZone(invoker,action.name.asString)
-        logging.info(this,s"<avs_debug> <ProContSpawn> 0.0 myInvoker: ${invoker.toInt} activation: ${msg.activationId} needToSpawnProactiveInvoker: ${needToSpawnProactiveInvoker} numContsToSpawnInMyInvoker: ${numContsToSpawnInMyInvoker}")
+        var (proactiveInvoker,proactiveInvokerNumReqsToIssue,numContsToSpawnInMyInvoker,needToSpawnProactiveInvoker) = actStats_checkInvokerOpZone(invoker,action.name.asString)
+        logging.info(this,s"<avs_debug> <ProContSpawn> 0.0 myInvoker: ${invoker.toInt} activation: ${msg.activationId} needToSpawnProactiveInvoker: ${needToSpawnProactiveInvoker} with ${proactiveInvokerNumReqsToIssue} dummy reqs numContsToSpawnInMyInvoker: ${numContsToSpawnInMyInvoker}")
         if(needToSpawnProactiveInvoker){
           // should make logic more sensible  -- should allow dummy req only if inFlightReqs are less than max. If this invoker doesn't fit, issue it to next one maybe? 
           //val proactiveInvoker: InvokerHealth = schedulingState.managedInvokers(toUseProactiveInvokerId)
-          val (actualNumDummyReqs,canIssueDummyReqs) = canIssueDummyReqToInvoker(proactiveInvoker,action.name.asString,schedulingState.numProactiveContsToSpawn)
+          //val (actualNumDummyReqs,canIssueDummyReqs) = canIssueDummyReqToInvoker(proactiveInvoker,action.name.asString,schedulingState.numProactiveContsToSpawn)
+          val actualNumDummyReqs = if(proactiveInvokerNumReqsToIssue < schedulingState.numProactiveContsToSpawn) proactiveInvokerNumReqsToIssue else schedulingState.numProactiveContsToSpawn
+          val canIssueDummyReqs: Boolean = actualNumDummyReqs>0
+          logging.info(this,s"<avs_debug> <ProContSpawn> 0.5 myInvoker: ${invoker.toInt} proactiveInvoker: ${proactiveInvoker.toInt} canIssueDummyReqs: ${canIssueDummyReqs} actualNumDummyReqs: ${actualNumDummyReqs}")
           var curIter = 0
           if(canIssueDummyReqs){
             for(curIter <- 1 to actualNumDummyReqs){
@@ -338,6 +341,8 @@ class AdaptiveContainerPoolBalancer(
               logging.info(this,s"<avs_debug> <ProContSpawn> 1.0 curIter: ${curIter} curActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId} in invoker: ${proactiveInvoker.toInt}")            
             }
 
+            if(actualNumDummyReqs>0) issuedSomeDummyReqs(proactiveInvoker,action.name.asString,actualNumDummyReqs)
+
           }else{
             logging.info(this,s"<avs_debug> <ProContSpawn> 1.1 myInvoker: ${invoker.toInt} and curActivation: ${msg.activationId} wants to issue a dummy req but, invoker: ${toUseProactiveInvokerId} cannot accommodate a new request! ")            
           }
@@ -367,8 +372,7 @@ class AdaptiveContainerPoolBalancer(
               logging.info(this,s"<avs_debug> <ProContSpawn> 1.6 curIter: ${curIter} myInvoker: ${invoker.toInt} CurActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId}")            
             }
 
-            if(numContsToSpawnInMyInvoker>0)
-              issuedSomeDummyReqs(invoker,action.name.asString,numContsToSpawnInMyInvoker)
+            if(numContsToSpawnInMyInvoker>0) issuedSomeDummyReqs(invoker,action.name.asString,numContsToSpawnInMyInvoker)
 
           }
 

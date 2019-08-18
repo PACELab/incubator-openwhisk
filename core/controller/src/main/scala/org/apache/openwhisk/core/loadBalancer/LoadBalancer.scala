@@ -273,14 +273,14 @@ class ActionStats(val actionName:String,logging: Logging){
 
   }
 
-  def isProactiveNeeded(invoker: InvokerInstanceId): (InvokerInstanceId,Int,Boolean) = {
+  def isProactiveNeeded(invoker: InvokerInstanceId): (InvokerInstanceId,Int,Int,Boolean) = {
     val tempTimeSortedInvokers = ListMap(lastInstantUsed.toSeq.sortWith(_._2 > _._2):_*)
     val timeSortedInvokers = tempTimeSortedInvokers.keys.toList
-    var arrIdx = -1
+    var mainLoopIdx = -1
 
     timeSortedInvokers.foreach{
       curInvoker =>
-      arrIdx+=1 
+      mainLoopIdx+=1 
       logging.info(this,s"\t <avs_debug> <IPN> Action: ${actionName}, invoker: ${curInvoker.toInt} was the invoker used at ${lastInstantUsed(curInvoker)}")
       usedInvokers.get(curInvoker) match {
         case Some(curInvokerStats) => 
@@ -289,29 +289,53 @@ class ActionStats(val actionName:String,logging: Logging){
           val (curInvokerNumContsToSpawn,decision) = curInvokerStats.checkInvokerActTypeOpZone(actionName)
           
           if(decision){ 
-            val toBeUsedIdx = arrIdx+1
 
-            if(toBeUsedIdx< timeSortedInvokers.size){
-              val nextInvoker = timeSortedInvokers(toBeUsedIdx)
-              logging.info(this,s"\t <avs_debug> <IPN> 1.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont spawning in nextInvoker: ${nextInvoker} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
-              return (nextInvoker,curInvokerNumContsToSpawn,decision)
-            }else{
-              logging.info(this,s"\t <avs_debug> <IPN> 2.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont but size of timeSortedInvokers is ${timeSortedInvokers.size}")  
-              // anyway won't spawn an invoker..
-              return (curInvoker,0,false)
+            var internalLoopIdx = -1
+            timeSortedInvokers.foreach{
+              nextInvoker =>
+              internalLoopIdx+=1
+              if(internalLoopIdx>mainLoopIdx){ // so all the invokers before me aren't "worthy, so will choose the next one.."
+                logging.info(this,s"<avs_debug> <IPN> curInvoker: ${curInvoker.toInt} internalLoopIdx: ${internalLoopIdx} checking whether I can issue dummy req to invoker: ${nextInvoker.toInt} ")
+                usedInvokers.get(curInvoker) match {
+                  case Some(nextInvokerStats) =>
+                    //val (actualNumDummyReqs,canIssueDummyReqs) = canIssueDummyReqToInvoker(proactiveInvoker,action.name.asString,schedulingState.numProactiveContsToSpawn)
+                    // canDummyReqBeIssued(actionName: String,numDummyReqs: Int)
+                    val (nextInvokerNumDummyReqsToIssue,nextInvokerDummyReqDecision) = nextInvokerStats.canDummyReqBeIssued(actionName,100)
+                    if(nextInvokerDummyReqDecision){
+                      logging.info(this,s"\t <avs_debug> <IPN> 1.0 curInvoker: ${curInvoker.toInt} nextInvoker: ${nextInvoker.toInt} can accommodate ${nextInvokerNumDummyReqsToIssue} dummy reqs")  
+                      return (nextInvoker,nextInvokerNumDummyReqsToIssue,curInvokerNumContsToSpawn,decision)
+                    }else{
+                      logging.info(this,s"\t <avs_debug> <IPN> 1.5 curInvoker: ${curInvoker.toInt} nextInvoker: ${nextInvoker.toInt} WONT accommodate ${nextInvokerNumDummyReqsToIssue} dummy reqs")  
+                    }
+                  case None =>
+                    logging.info(this,s"\t <avs_debug> <IPN> 2.0 curInvoker: ${curInvoker.toInt} Invoker: ${curInvoker.toInt} supposedly needs proactive cont but couldn't locate nextInvoker: ${nextInvoker.toInt}'s stats' ")
+                    return (curInvoker,0,0,false)    
+                }
+
+                /*if(toBeUsedIdx< timeSortedInvokers.size){
+                  val nextInvoker = timeSortedInvokers(toBeUsedIdx)
+                  logging.info(this,s"\t <avs_debug> <IPN> 1.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont spawning in nextInvoker: ${nextInvoker} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+                  return (nextInvoker,curInvokerNumContsToSpawn,decision)
+                }else{
+                  logging.info(this,s"\t <avs_debug> <IPN> 2.0 Invoker: ${curInvoker.toInt} supposedly needs proactive cont but size of timeSortedInvokers is ${timeSortedInvokers.size}")  
+                  // anyway won't spawn an invoker..
+                  return (curInvoker,0,false)
+                }*/
+
+              }
             }
           }
           else{
             logging.info(this,s"\t <avs_debug> <IPN> 3.0 Invoker: ${curInvoker.toInt} supposedly does NOT and size of timeSortedInvokers: ${timeSortedInvokers.size}")  
             // anyway won't spawn an invoker..
-            return (curInvoker,0,false)
+            return (curInvoker,0,0,false)
           }
         case None =>
           logging.info(this,s"\t <avs_debug> <IPN> 4.0 Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
       }
     }
     // anyway won't spawn an invoker..
-    (invoker,0,false)
+    (invoker,0,0,false)
   }
 
   def getActiveInvoker(activeInvokers: ListBuffer[InvokerHealth]): Option[InvokerInstanceId] = {
@@ -619,7 +643,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       retVal = false
       logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 3. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
     }
-    if(adjustedDummyReqs > 0 ) inFlightReqsByType(actType)+=adjustedDummyReqs
+    //if(adjustedDummyReqs > 0 ) inFlightReqsByType(actType)+=adjustedDummyReqs
     (adjustedDummyReqs,retVal)
 
     /*if( inFlightReqsByType(actType) <= maxInFlightReqsByType(actType) ){
