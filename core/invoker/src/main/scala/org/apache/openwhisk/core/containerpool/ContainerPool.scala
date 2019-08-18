@@ -447,11 +447,11 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       // next request to process
       // It is guaranteed, that only the first message on the buffer is resent.
       if (runBuffer.isEmpty || isResentFromBuffer) {
-        logging.info(this,s"\t <avs_debug> <findCont> 1.0 activ: ${r.msg.activationId} searching for a warm container in busyPool: ${busyPool.size}")
+        //logging.info(this,s"\t <avs_debug> <findCont> 1.0 activ: ${r.msg.activationId} searching for a warm container in busyPool: ${busyPool.size}")
         val createdContainer =
           // Is there enough space on the invoker for this action to be executed.
           if (hasPoolSpaceFor(busyPool, r.action.limits.memory.megabytes.MB)) {
-            logging.info(this,s"\t <avs_debug> <findCont> 1.1 activ: ${r.msg.activationId} I do have space in existing container in freePool: ${freePool.size}, trying to schedule in one of them..")
+            //logging.info(this,s"\t <avs_debug> <findCont> 1.1 activ: ${r.msg.activationId} I do have space in existing container in freePool: ${freePool.size}, trying to schedule in one of them..")
             // Schedule a job to a warm container
             ContainerPool
               .schedule(r.action, r.msg.user.namespace.name, freePool,logging)
@@ -461,7 +461,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
                 // There was no warm/warming/warmingCold container. Try to take a prewarm container or a cold container.
                 // Is there enough space to create a new container or do other containers have to be removed?
                 if (hasPoolSpaceFor(busyPool ++ freePool, r.action.limits.memory.megabytes.MB)) {                  
-                  logging.info(this,s"\t <avs_debug> <findCont> 1.3 activ: ${r.msg.activationId} can a prewarmed container accommodate me?")
+                  //logging.info(this,s"\t <avs_debug> <findCont> 1.3 activ: ${r.msg.activationId} can a prewarmed container accommodate me?")
                   // avs --begin
                   canUseCore = ((canUseCore+1)%4); 
                   cpuSharesPool.get(r.action.name.asString) match {
@@ -605,21 +605,21 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
         logging.error(this, s"invalid activation count after warming < 1 ${newData}")
       }
       if (newData.hasCapacity()) {
-        logging.info(this, s"<avs_debug> <InNeedWork> 1.0 trackContId: ${trackContId} cont: ${warmData.container} adding it to freepool.. ")
+        //logging.info(this, s"<avs_debug> <InNeedWork> 1.0 trackContId: ${trackContId} cont: ${warmData.container} adding it to freepool.. ")
         //remove from busy pool (may already not be there), put back into free pool (to update activation counts)
         freePool = freePool + (sender() -> newData)
         if (busyPool.contains(sender())) {
-          logging.info(this, s"<avs_debug> <InNeedWork> 1.1 trackContId: ${trackContId} is present in busyPool, so removing it..")
+          //logging.info(this, s"<avs_debug> <InNeedWork> 1.1 trackContId: ${trackContId} is present in busyPool, so removing it..")
           busyPool = busyPool - sender()
           if (newData.action.limits.concurrency.maxConcurrent > 1) {
-            logging.info(this, s"<avs_debug> <InNeedWork> 1.2 trackContId: ${trackContId} maxConcurrent is >1")
+            //logging.info(this, s"<avs_debug> <InNeedWork> 1.2 trackContId: ${trackContId} maxConcurrent is >1")
             logging.info(
               this,
               s"concurrent container ${newData.container} is no longer busy with ${newData.activeActivationCount} activations")
           }
         }
       } else {
-        logging.info(this, s"<avs_debug> <InNeedWork> 2.0 trackContId: ${trackContId} doesn't have capacity. Moving it to busyPool from freepool.")
+        //logging.info(this, s"<avs_debug> <InNeedWork> 2.0 trackContId: ${trackContId} doesn't have capacity. Moving it to busyPool from freepool.")
         busyPool = busyPool + (sender() -> newData)
         freePool = freePool - sender()
       }
@@ -1025,22 +1025,8 @@ object ContainerPool {
                                            invocationNamespace: EntityName,
                                            idles: Map[A, ContainerData],logging: AkkaLogging): Option[(A, ContainerData)] = {
 
-    //logging.info(this,s"<avs> <findCont:schedule> action: ${action.name.name} namespace: ${namespaceName}")
-    idles.keys.foreach{
-      curActor =>
-      val curCont: ContainerData = idles(curActor)
-      curCont.getContainer match {
-        case Some(container) =>
-          logging.info(this,s"<avs> <findCont:schedule> P1. cont: ${container} lastUsed: ${curCont.lastUsed} initState: ${curCont.initingState} hasCapacity: ${curCont.hasCapacity()}")
-        case None =>
-          logging.info(this,s"<avs> <findCont:schedule> P2. cont: didnt-find lastUsed: ${curCont.lastUsed} initState: ${curCont.initingState} hasCapacity: ${curCont.hasCapacity()}")
-      }
-    }
-
     idles.find {
-        case (_, c @ WarmedData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => 
-          logging.info(this,s"<avs> <findCont:schedule> 1. cont: ${c} lastUsed: ${c.lastUsed} initState: ${c.initingState} activeActivationCount: ${c.activeActivationCount} hasCapacity: ${c.hasCapacity()}")
-          true
+        case (_, c @ WarmedData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true
 
         case (a,curCont) =>
           curCont.getContainer match {
@@ -1067,28 +1053,18 @@ object ContainerPool {
               false
           }
 
-        case _ =>      
-         logging.info(this,s"<avs> <findCont:schedule> 2. ")
-        false
+        case _ => false
       }
       .orElse {
         idles.find {
-          case (_, c @ WarmingData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => 
-            logging.info(this,s"<avs> <findCont:schedule> 3. cont: ${c} lastUsed: ${c.lastUsed} initState: ${c.initingState} activeActivationCount: ${c.activeActivationCount} hasCapacity: ${c.hasCapacity()}")
-            true
-          case _ =>      
-         logging.info(this,s"<avs> <findCont:schedule> 4. ")
-        false
+          case (_, c @ WarmingData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true
+          case _                                                                                 => false
         }
       }
       .orElse {
         idles.find {
-          case (_, c @ WarmingColdData(`invocationNamespace`, `action`, _, _)) if c.hasCapacity() => 
-            logging.info(this,s"<avs> <findCont:schedule> 5. cont: ${c} lastUsed: ${c.lastUsed} initState: ${c.initingState} activeActivationCount: ${c.activeActivationCount} hasCapacity: ${c.hasCapacity()}")
-            true           
-          case _ =>      
-         logging.info(this,s"<avs> <findCont:schedule> 6. ")
-        false       
+          case (_, c @ WarmingColdData(`invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true           
+          case _                                                                                  => false       
       }
     }
 

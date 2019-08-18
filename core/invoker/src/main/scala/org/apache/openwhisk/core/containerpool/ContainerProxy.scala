@@ -427,31 +427,31 @@ class ContainerProxy(
       implicit val transid = job.msg.transid
       activeCount += 1
 
-      logging.info(this, s" <avs_debug> <cproxy:Ready> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}")
+      //logging.info(this, s" <avs_debug> <cproxy:Ready> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}")
       initializeAndRun(data.container, job)
         .map(_ => RunCompleted)
         .pipeTo(self)
 
-      logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will go to run..")
+      //logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will go to run..")
       goto(Running) using data
 
     // pause grace timed out
     case Event(StateTimeout, data: WarmedData) =>
-      logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will go to suspend..")
+      //logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will go to suspend..")
       data.container.suspend()(TransactionId.invokerNanny).map(_ => ContainerPaused).pipeTo(self)
       goto(Pausing)
 
     case Event(Remove, data: WarmedData) => 
-      logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will be removed..")
+      //logging.info(this, s" <avs_debug> <cproxy:Ready> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Will be removed..")
       destroyContainer(data.container,data.action.name.asString)
   }
 
   when(Pausing) {
     case Event(ContainerPaused, data: WarmedData)   => 
-      logging.info(this, s" <avs_debug> <cproxy:Pausing> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
+      //logging.info(this, s" <avs_debug> <cproxy:Pausing> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
       goto(Paused)
     case Event(_: FailureMessage, data: WarmedData) => 
-      logging.info(this, s" <avs_debug> <cproxy:Pausing> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
+      //logging.info(this, s" <avs_debug> <cproxy:Pausing> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
       destroyContainer(data.container,data.action.name.asString)
     case _                                          => delay
   }
@@ -462,7 +462,7 @@ class ContainerProxy(
       implicit val transid = job.msg.transid
       activeCount += 1
 
-      logging.info(this, s" <avs_debug> <cproxy:Paused> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
+      //logging.info(this, s" <avs_debug> <cproxy:Paused> 1. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}.")
       data.container
         .resume()
         .andThen {
@@ -481,7 +481,7 @@ class ContainerProxy(
 
     // container is reclaimed by the pool or it has become too old
     case Event(StateTimeout | Remove, data: WarmedData) =>
-      logging.info(this, s" <avs_debug> <cproxy:Paused> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Toreschedule yo! ")
+      //logging.info(this, s" <avs_debug> <cproxy:Paused> 2. container ${data.container}; ${activeCount} data.hasCapacity: ${data.hasCapacity()} activations: ${data.activeActivationCount}. Toreschedule yo! ")
       rescheduleJob = true // to supress sending message to the pool and not double count
       destroyContainer(data.container,data.action.name.asString)
   }
@@ -628,7 +628,7 @@ class ContainerProxy(
           "deadline" -> (Instant.now.toEpochMilli + actionTimeout.toMillis).toString.toJson)
 
         // avs --begin
-        /*if(job.msg.proactiveSpawning){
+        if(job.msg.proactiveSpawning){
           logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} is proactiveSpawning"); //avs 
           logging.info(this, s"<initializeAndRun> caught expected proactiveSpawning while running activation: ${job.msg.activationId} of action: ${job.action.name}. Won't Run anything here..")
           Future.successful(ContainerProxy.constructWhiskActivation(
@@ -638,9 +638,9 @@ class ContainerProxy(
             false,
             ActivationResponse.success(None)))         
         }
-        //else{
+        else{
           logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} IS NOT proactiveSpawning"); //avs 
-        // avs --end*/
+        // avs --end
         container
           .run(
             parameters,
@@ -659,7 +659,7 @@ class ContainerProxy(
                 runInterval.duration >= actionTimeout,
                 response)
           }
-        //}
+        }
       }
       .recover {
         case InitializationError(interval, response) =>
