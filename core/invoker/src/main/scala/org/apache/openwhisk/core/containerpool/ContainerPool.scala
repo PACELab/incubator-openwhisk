@@ -88,7 +88,7 @@ class TrackFunctionStats(
   private var trackSharesUsed = mutable.Map.empty[Int,Int] // <num-shares>,<num-times-used>
   trackSharesUsed = trackSharesUsed + (defaultCpuShares -> 0)
 
-  var curCpuShares = defaultCpuShares
+  var curCpuShares = maxCpuShares
   var prevSharesUsed = curCpuShares // defaultCpuShares
   allCpuShares+= defaultCpuShares // added as part of consturctor.
 

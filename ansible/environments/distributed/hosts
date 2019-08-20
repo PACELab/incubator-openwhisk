@@ -4,10 +4,10 @@
 ansible ansible_connection=local
 
 [registry]
-172.24.86.110       ansible_host=172.24.86.110
+172.24.38.105       ansible_host=172.24.38.105
 
 [edge]
-172.24.44.121       ansible_host=172.24.44.121
+172.24.133.42       ansible_host=172.24.133.42
 
 [apigateway:children]
 edge
@@ -16,18 +16,19 @@ edge
 edge
 
 [controllers]
-172.24.86.110       ansible_host=172.24.86.110
+172.24.38.105       ansible_host=172.24.38.105
 
 [kafkas]
-172.24.86.110       ansible_host=172.24.86.110
+172.24.38.105       ansible_host=172.24.38.105
 
 [zookeepers:children]
 kafkas
 
 [invokers]
-serverless-dev3                ansible_host=serverless-dev3
-serverless-dev4                ansible_host=serverless-dev4
-serverless-dev5		       ansible_host=serverless-dev5	
+serverless-1                ansible_host=serverless-1
+serverless-2                ansible_host=serverless-2
+serverless-3		       ansible_host=serverless-3	
+serverless-4               ansible_host=serverless-4    
 
 [db]
-172.24.86.110       ansible_host=172.24.86.110
+172.24.38.105       ansible_host=172.24.38.105
