@@ -25,7 +25,10 @@ edge
 kafkas
 
 [invokers]
-serverless-7                ansible_host=serverless-7 
+serverless-1  ansible_host=serverless-1
+serverless-7  ansible_host=serverless-7
+serverless-3  ansible_host=serverless-3    
+serverless-4  ansible_host=serverless-4    
 
 [db]
 172.24.38.105       ansible_host=172.24.38.105

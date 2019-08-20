@@ -322,13 +322,15 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     curRunningActions.get(actionName) match {
       case Some(curActStats) => 
         logging.info(this,s"<avs_debug> <getUsedInvokerForAction> action: ${actionName} is PRESENT in curRunningActions")
-        curActStats.getUsedInvoker()
+        //curActStats.getUsedInvoker()
+        curActStats.getAutoScaleUsedInvoker()
       case None => 
         logging.info(this,s"<avs_debug> <getUsedInvokerForAction> action: ${actionName} is ABSENT in curRunningActions")
         
         curRunningActions = curRunningActions + (actionName-> new ActionStats(actionName,logging))
         var myActStats :ActionStats = curRunningActions(actionName)
-        myActStats.getUsedInvoker()
+        //myActStats.getUsedInvoker()
+        myActStats.getAutoScaleUsedInvoker()
     }
   } 
   
@@ -428,13 +430,15 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     curRunningActions.get(actionName) match {
       case Some(curActStats) => 
         logging.info(this,s"<avs_debug> <as_cio> action: ${actionName} is PRESENT in curRunningActions")
-        curActStats.isProactiveNeeded(invoker)
+        //curActStats.isProactiveNeeded(invoker)
+        curActStats.isAutoscaleProactiveNeeded(invoker)
       case None => 
         logging.info(this,s"<avs_debug> <as_cio> action: ${actionName} is ABSENT in curRunningActions")
         
         curRunningActions = curRunningActions + (actionName-> new ActionStats(actionName,logging))
         var myActStats :ActionStats = curRunningActions(actionName)
-        myActStats.isProactiveNeeded(invoker)
+        //myActStats.isProactiveNeeded(invoker)
+        myActStats.isAutoscaleProactiveNeeded(invoker)
     }
   }
 
