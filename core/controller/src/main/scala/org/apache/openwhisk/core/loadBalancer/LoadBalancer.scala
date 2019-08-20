@@ -248,7 +248,8 @@ class ActionStats(val actionName:String,logging: Logging){
 
   def getAutoScaleUsedInvoker(): Option[InvokerInstanceId] = {
     //var rankOrderedInvokers = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.invokerRank)) //(Ordering[(Int,Long)].reverse)
-    var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank < _._2.invokerRank):_*)
+    //var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank < _._2.invokerRank):_*) // OG-AUTOSCALE!
+    var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank > _._2.invokerRank):_*)
 
     rankOrderedInvokers.keys.foreach{
       curInvoker =>
@@ -284,7 +285,7 @@ class ActionStats(val actionName:String,logging: Logging){
   def isAutoscaleProactiveNeeded(toCheckInvoker: InvokerInstanceId): (InvokerInstanceId,Int,Int,Boolean) = {
 
     //var rankOrderedInvokers = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.invokerRank)) //(Ordering[(Int,Long)].reverse)
-    val tempRankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank < _._2.invokerRank):_*)
+    val tempRankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank > _._2.invokerRank):_*)
     val rankSortedInvokers = tempRankOrderedInvokers.keys.toList
     var mainLoopIdx = toCheckInvoker.toInt // assuming it starts from 0-index
 
@@ -295,11 +296,14 @@ class ActionStats(val actionName:String,logging: Logging){
         val (curInvokerNumContsToSpawn,decision) = curInvokerStats.checkInvokerActTypeOpZone(actionName)
           
         if(decision){ 
-          var internalLoopIdx = -1
+          //var internalLoopIdx = -1 // // OG-AUTOSCALE!
+          var internalLoopIdx = rankSortedInvokers.size
           rankSortedInvokers.foreach{
             nextInvoker =>
-            internalLoopIdx+=1
-            if(internalLoopIdx>mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."
+            internalLoopIdx-=1
+            //internalLoopIdx+=1  // OG-AUTOSCALE!
+            //if(internalLoopIdx>mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."  // OG-AUTOSCALE!
+            if(internalLoopIdx < mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."
               logging.info(this,s"<avs_debug> <IASPN> 0.0 toCheckInvoker: ${toCheckInvoker.toInt} internalLoopIdx: ${internalLoopIdx} checking whether I can issue dummy req to nextInvoker: ${nextInvoker.toInt} ")
               usedInvokers.get(nextInvoker) match {
                 case Some(nextInvokerStats) =>
