@@ -415,7 +415,6 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   var maxProactiveNumConts: Int = 2
   var curNumProcactiveConts: Int = 0
   var lastTime_ProactivelySpawned: Long = 0 //Instant.now.toEpochMilli
-  var lastTime_HeartbeatSent: Long = 0
   // -------------- Thresholds --------------
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
@@ -487,12 +486,12 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
           curActStats.resetStats(curTime,resetStatsTimeoutFlag)
 
         logging.info(this,s"\t <avs_debug> <AIS:findActionNumContsOpZone> 1. invoker: ${id.toInt} has action: ${toCheckAction}, it has numConts: ${curActStats.numConts} and it's opZone: ${curActStats.opZone}")     
-        (curActStats.numConts,curActStats.opZone,curActStats.proactiveTimeoutInMilli)
+        (curActStats.numConts,curActStats.opZone,curActStats.lastUpdated)
       case None =>
         //allActions = allActions + (toCheckAction -> new ActionStatsPerInvoker(toCheckAction,id.toInt,logging))
         addAction(toCheckAction)
         logging.info(this,s"\t <avs_debug> <AIS:findActionNumContsOpZone> 2. invoker: ${id.toInt} does NOT have action: ${toCheckAction}.")    
-        (0,opZoneSafe,statsTimeoutInMilli) // FIX-IT: last param is not right..
+        (0,opZoneSafe,Instant.now.toEpochMilli) // FIX-IT: last param is not right..
     }    
   }
 
@@ -505,7 +504,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
       //allActionsOfCurType.foreach{ curAction =>
       allActionsOfCurType.keys.foreach{ curAction =>  
-        val (numConts,thisActOpZone,proactiveTimeoutInMilli) = findActionNumContsOpZone(curAction)
+        val (numConts,thisActOpZone,lastUpdated) = findActionNumContsOpZone(curAction)
         
         if(maxOpZone < thisActOpZone)
           maxOpZone = thisActOpZone
@@ -546,16 +545,17 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   def checkInvokerActTypeOpZone(actionName: String): (Int,Boolean) ={
     var actType = getActionType(actionName)  
     //updateActTypeStats()
-    var (myConts,status_opZone,curAct_proactiveTimeoutInMilli) = findActionNumContsOpZone(actionName)
+    var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
     var myTypeConts = numConts(actType)  
 
     var nextInvokerSpawnDecision: Boolean = false
     var curInvokerSpawnDecision: Boolean = false
     var curInvokerNumContsToSpawn = 0
 
+    var curInstant: Long = Instant.now.toEpochMilli
     //logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 0. invoker: ${id.toInt} action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone}  inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} maxInFlightReqsByType(actType): ${maxInFlightReqsByType(actType)}  curNumProcactiveConts: ${curNumProcactiveConts}")
-    var timeSinceLastProactive = (Instant.now.toEpochMilli - lastTime_ProactivelySpawned)
-    var timeSinceLastHeartbeat = (Instant.now.toEpochMilli - lastTime_HeartbeatSent)
+    var timeSinceLastProactive = (curInstant - lastTime_ProactivelySpawned)
+    var timeSinceLastUpdated = (curInstant - lastUpdated)
 
     if( (myTypeConts==0) && (inFlightReqsByType(actType)==1) ){
       nextInvokerSpawnDecision = true
@@ -570,10 +570,9 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         }
       }
 
-      lastTime_ProactivelySpawned = Instant.now.toEpochMilli
-      lastTime_HeartbeatSent = lastTime_ProactivelySpawned
+      lastTime_ProactivelySpawned = curInstant
       logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
-    }else if(timeSinceLastProactive >= curAct_proactiveTimeoutInMilli){
+    }else if(timeSinceLastProactive >= statsTimeoutInMilli){
       nextInvokerSpawnDecision = true
 
       if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
@@ -586,18 +585,16 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         }
       }      
 
-      lastTime_ProactivelySpawned = Instant.now.toEpochMilli
-      lastTime_HeartbeatSent = lastTime_ProactivelySpawned
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${curAct_proactiveTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
-    }else if(timeSinceLastHeartbeat >= heartbeatTimeoutInMilli){
+      lastTime_ProactivelySpawned = curInstant
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+    }else if(timeSinceLastUpdated >= heartbeatTimeoutInMilli){
       // to ensure the proactively spawned containers in the next invoker doesn't die..
       nextInvokerSpawnDecision = true
       curInvokerSpawnDecision = true // hack, because, isProactiveNeeded wants this to check whether next invoker can accommodate more requests..
       curInvokerNumContsToSpawn = 0 // this is OK, since i don't want to send dummy reqs to myself anyway..
-      lastTime_HeartbeatSent = Instant.now.toEpochMilli
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastHeartbeat} is greater than heartbeat-timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince-lastUpdated: ${timeSinceLastUpdated} is greater than heartbeat-timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }else{
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> NOPE. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${curAct_proactiveTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> NOPE. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }
     (curInvokerNumContsToSpawn,nextInvokerSpawnDecision)
   }
@@ -609,7 +606,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
     updateActTypeStats()
     var myTypeConts = numConts(actType)  
-    var (myConts,status_opZone,curAct_proactiveTimeoutInMilli) = findActionNumContsOpZone(actionName)
+    var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
     var adjustedDummyReqs = 0
 
     if(myConts==0){
@@ -665,7 +662,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     
     var actType = getActionType(actionName)  
     var retVal: Boolean = false
-    var (myConts,status_opZone,curAct_proactiveTimeoutInMilli) = findActionNumContsOpZone(actionName)
+    var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
     updateActTypeStats()
     var myTypeConts = numConts(actType)  
 
