@@ -258,6 +258,8 @@ class AdaptiveContainerPoolBalancer(
 
     var beginInstant: Long = Instant.now.toEpochMilli;
     var proactiveBegin: Long = 0
+    var checkEnd: Long = 0;
+    var proactiveEndInstat: Long = 0
     var endInstant: Long =0 
     val chosen = if (invokersToUse.nonEmpty) {
       val hash = AdaptiveContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
@@ -329,6 +331,7 @@ class AdaptiveContainerPoolBalancer(
         proactiveBegin = Instant.now.toEpochMilli        
         //schedulingState.curInvokerPoolMaintenance.dummySleep()
         var (proactiveInvoker,proactiveInvokerNumReqsToIssue,numContsToSpawnInMyInvoker,needToSpawnProactiveInvoker) = actStats_checkInvokerOpZone(invoker,action.name.asString, schedulingState.curInvokerProactiveContsToSpawn,schedulingState.numProactiveContsToSpawn)
+        checkEnd = Instant.now.toEpochMilli        
         logging.info(this,s"<avs_debug> <ProContSpawn:0.0> myInvoker: ${invoker.toInt} activation: ${msg.activationId} numContsToSpawnInMyInvoker: ${numContsToSpawnInMyInvoker}. proactiveInvoker: ${proactiveInvoker.toInt} needToSpawnProactiveInvoker: ${needToSpawnProactiveInvoker} with ${proactiveInvokerNumReqsToIssue} dummy reqs ")
         if((needToSpawnProactiveInvoker) || (numContsToSpawnInMyInvoker>0)){
 
@@ -403,14 +406,15 @@ class AdaptiveContainerPoolBalancer(
             logging.info(this,s"<avs_debug> <ProContSpawn:1.1> myInvoker: ${invoker.toInt} and curActivation: ${msg.activationId} wants to issue a dummy req but, invoker: ${toUseProactiveInvokerId} cannot accommodate a new request! ")            
           }
 
-          endInstant = Instant.now.toEpochMilli // avs
-          logging.info(this,s"<avs_debug> <ProContSpawn:1.9> myInvoker: ${invoker.toInt} activation: ${msg.activationId} needToSpawnProactiveInvoker: ${needToSpawnProactiveInvoker} numContsToSpawnInMyInvoker: ${numContsToSpawnInMyInvoker} time: ${endInstant-proactiveBegin}")
+          proactiveEndInstat = Instant.now.toEpochMilli // avs
+          logging.info(this,s"<avs_debug> <ProContSpawn:1.9> myInvoker: ${invoker.toInt} activation: ${msg.activationId} needToSpawnProactiveInvoker: ${needToSpawnProactiveInvoker} numContsToSpawnInMyInvoker: ${numContsToSpawnInMyInvoker} time: ${proactiveEndInstat-proactiveBegin}")
         }else{
+          proactiveEndInstat = Instant.now.toEpochMilli // avs
           logging.info(this,s"<avs_debug> <ProContSpawn:2.0> myInvoker: ${invoker.toInt}  activation: ${msg.activationId} numContsToSpawnInMyInvoker: ${numContsToSpawnInMyInvoker}")
         }
 
         endInstant = Instant.now.toEpochMilli // avs
-        logging.info(this,s"<avs_debug> <ProContSpawn:DONE> dispatching activation: ${msg.activationId} time-taken(end-begin): ${endInstant-beginInstant}")
+        logging.info(this,s"<avs_debug> <ProContSpawn:DONE> dispatching activation: ${msg.activationId} time-taken(end-begin): ${endInstant-beginInstant} proactive: ${proactiveEndInstat - proactiveBegin} proactive-check: ${checkEnd - proactiveBegin}")
         //logging.info(this,s"<avs_debug> <ProContSpawn> DONE dispatching activation: ${msg.activationId} time-taken(end-begin): ${endInstant-beginInstant} end: ${endInstant} begun: ${beginInstant}")
         //logging.info(this,s"<avs_debug> <ProContSpawn> If issued a new activation, it'd be given id.: ${proactiveMsg.activationId} (end-proactiveBegin): ${endInstant-proactiveBegin} end: ${endInstant} proactiveBegin: ${proactiveBegin}")
         // avs --end

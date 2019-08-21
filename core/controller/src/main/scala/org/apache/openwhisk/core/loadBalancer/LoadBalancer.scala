@@ -190,7 +190,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
         opZoneUpdate()      
     }
     numConts = toUpdateNumConts
-    logging.info(this,s"\t <avs_debug> <ASPI:update> In update of Action: ${actionName} myInvokerID: ${myInvokerID}, latency: ${latency} count: ${runningCount} cumulSum: ${cumulSum} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} opZone: ${opZone} ")     
+    logging.info(this,s"\t <avs_debug> <ASPI:update> In update of Action: ${actionName} myInvokerID: ${myInvokerID}, initTime: ${initTime} latency: ${latency} count: ${runningCount} cumulSum: ${cumulSum} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} opZone: ${opZone} ")     
   }
 
 }
@@ -206,8 +206,7 @@ class ActionStats(val actionName:String,logging: Logging){
   private[this] val rwLock = new Object
 
   def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,latencyVal: Long,initTime: Long, toUpdateNumConts: Int){
-    rwLock.synchronized{
-      usedInvokers.get(invoker) match{
+    usedInvokers.get(invoker) match{
       case Some(curInvokerStats) =>
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} initTime: ${initTime}")
         // updateActionStats(toUpdateAction:String, latencyVal: Long, toUpdateNumConts:Int):Unit = {
@@ -223,8 +222,7 @@ class ActionStats(val actionName:String,logging: Logging){
 
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} at instant: ${curInstant} initTime: ${initTime}")
         tempInvokerStats.updateActionStats(actionName,latencyVal,initTime,toUpdateNumConts)
-      }      
-    }
+    }      
   } 
 
   def getAutoScaleUsedInvoker(): Option[InvokerInstanceId] = {
