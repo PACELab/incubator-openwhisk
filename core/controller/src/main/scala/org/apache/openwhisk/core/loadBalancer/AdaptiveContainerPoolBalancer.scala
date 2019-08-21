@@ -328,8 +328,7 @@ class AdaptiveContainerPoolBalancer(
         // avs --begin
         proactiveBegin = Instant.now.toEpochMilli        
         //schedulingState.curInvokerPoolMaintenance.dummySleep()
-        //if(checkInvokerOpZone(invoker,action.name.asString)){
-        var (proactiveInvoker,proactiveInvokerNumReqsToIssue,numContsToSpawnInMyInvoker,needToSpawnProactiveInvoker) = actStats_checkInvokerOpZone(invoker,action.name.asString)
+        var (proactiveInvoker,proactiveInvokerNumReqsToIssue,numContsToSpawnInMyInvoker,needToSpawnProactiveInvoker) = actStats_checkInvokerOpZone(invoker,action.name.asString, schedulingState.curInvokerProactiveContsToSpawn,schedulingState.numProactiveContsToSpawn)
         logging.info(this,s"<avs_debug> <ProContSpawn:0.0> myInvoker: ${invoker.toInt} activation: ${msg.activationId} numContsToSpawnInMyInvoker: ${numContsToSpawnInMyInvoker}. proactiveInvoker: ${proactiveInvoker.toInt} needToSpawnProactiveInvoker: ${needToSpawnProactiveInvoker} with ${proactiveInvokerNumReqsToIssue} dummy reqs ")
         if((needToSpawnProactiveInvoker) || (numContsToSpawnInMyInvoker>0)){
 
@@ -358,7 +357,7 @@ class AdaptiveContainerPoolBalancer(
               logging.info(this,s"<avs_debug> <ProContSpawn:1.6> curIter: ${curIter} myInvoker: ${invoker.toInt} CurActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId}")            
             }
 
-            if(numContsToSpawnInMyInvoker>0) issuedSomeDummyReqs(invoker,action.name.asString,numContsToSpawnInMyInvoker)
+            //if(numContsToSpawnInMyInvoker>0) issuedSomeDummyReqs(invoker,action.name.asString,numContsToSpawnInMyInvoker)
 
           }
 
@@ -398,7 +397,7 @@ class AdaptiveContainerPoolBalancer(
               logging.info(this,s"<avs_debug> <ProContSpawn:1.0> curIter: ${curIter} curActivation: ${msg.activationId} issued a new activation: ${proactiveMsg.activationId} in invoker: ${proactiveInvoker.toInt}")            
             }
 
-            if(actualNumDummyReqs>0) issuedSomeDummyReqs(proactiveInvoker,action.name.asString,actualNumDummyReqs)
+            //if(actualNumDummyReqs>0) issuedSomeDummyReqs(proactiveInvoker,action.name.asString,actualNumDummyReqs)
 
           }else{
             logging.info(this,s"<avs_debug> <ProContSpawn:1.1> myInvoker: ${invoker.toInt} and curActivation: ${msg.activationId} wants to issue a dummy req but, invoker: ${toUseProactiveInvokerId} cannot accommodate a new request! ")            

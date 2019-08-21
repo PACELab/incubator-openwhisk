@@ -379,7 +379,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     } 
   }
 
-  def issuedSomeDummyReqs(invoker: InvokerInstanceId,actionName:String,numContsSpawnedInMyInvoker: Int): Unit = {
+  /*def issuedSomeDummyReqs(invoker: InvokerInstanceId,actionName:String,numContsSpawnedInMyInvoker: Int): Unit = {
     logging.info(this,s"<avs_debug> <ISDR> on invoker: ${invoker.toInt}")
     allInvokers.get(invoker) match {
       case Some(curInvokerStats) =>
@@ -392,7 +392,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
         tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
         tempInvokerStats.issuedSomeDummyReqs(actionName,numContsSpawnedInMyInvoker)
       }    
-  }
+  }*/
 
   def canIssueDummyReqToInvoker(invoker: InvokerInstanceId,actionName:String,numDummyReqsToIssue: Int): (Int,Boolean) ={
     logging.info(this,s"<avs_debug> <CIDRTI> on invoker: ${invoker.toInt}")
@@ -408,37 +408,20 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
         tempInvokerStats.canDummyReqBeIssued(actionName,numDummyReqsToIssue)
       }         
   }
-  
-  def checkInvokerOpZone(invoker: InvokerInstanceId,actionName:String): Boolean = {
-    logging.info(this,s"<avs_debug> <checkInvokerOpZone> on invoker: ${invoker.toInt}")
-    allInvokers.get(invoker) match {
-      case Some(curInvokerStats) =>
-        logging.info(this,s"<avs_debug> in <checkInvokerOpZone> invoker: ${invoker.toInt} is PRESENT in allInvokers ")
-        val (curInvokerNumContsToSpawn,nextInvokerSpawnDecision) = curInvokerStats.checkInvokerActTypeOpZone(actionName)
-        nextInvokerSpawnDecision
-      case None =>
-        allInvokers = allInvokers + (invoker -> new AdapativeInvokerStats(invoker,InvokerState.Healthy,logging) )
-        logging.info(this,s"<avs_debug> in <checkInvokerOpZone> invoker: ${invoker.toInt} is ABSENT in allInvokers ")
-        var tempInvokerStats = allInvokers(invoker)
-        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
-        val (curInvokerNumContsToSpawn,nextInvokerSpawnDecision) =  tempInvokerStats.checkInvokerActTypeOpZone(actionName)
-        nextInvokerSpawnDecision
-      }     
-  }
 
-  def actStats_checkInvokerOpZone(invoker: InvokerInstanceId,actionName: String): (InvokerInstanceId,Int,Int,Boolean) = {
+  def actStats_checkInvokerOpZone(invoker: InvokerInstanceId,actionName: String,myProactiveMaxReqs: Int,nextInvokerMaxProactiveReqs: Int): (InvokerInstanceId,Int,Int,Boolean) = {
     curRunningActions.get(actionName) match {
       case Some(curActStats) => 
         logging.info(this,s"<avs_debug> <as_cio> action: ${actionName} is PRESENT in curRunningActions")
         //curActStats.isProactiveNeeded(invoker)
-        curActStats.isAutoscaleProactiveNeeded(invoker)
+        curActStats.isAutoscaleProactiveNeeded(invoker,myProactiveMaxReqs,nextInvokerMaxProactiveReqs)
       case None => 
         logging.info(this,s"<avs_debug> <as_cio> action: ${actionName} is ABSENT in curRunningActions")
         
         curRunningActions = curRunningActions + (actionName-> new ActionStats(actionName,logging))
         var myActStats :ActionStats = curRunningActions(actionName)
         //myActStats.isProactiveNeeded(invoker)
-        myActStats.isAutoscaleProactiveNeeded(invoker)
+        myActStats.isAutoscaleProactiveNeeded(invoker,myProactiveMaxReqs,nextInvokerMaxProactiveReqs)
     }
   }
 
