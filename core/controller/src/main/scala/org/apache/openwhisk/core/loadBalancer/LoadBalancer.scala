@@ -26,13 +26,15 @@ import org.apache.openwhisk.core.connector._
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.spi.Spi
 import scala.concurrent.duration._
+// avs --beging
 import scala.collection.mutable //avs
 import scala.collection.immutable //avs
 import scala.collection.mutable.ListBuffer //avs
 import java.time.Instant // avs
 import scala.collection.immutable.ListMap // avs
 //import util.control.Breaks._ // avs
-// avs --begin
+//import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentMap
 
 class functionInfo {
   // avs --begin
@@ -99,7 +101,7 @@ class functionInfo {
   var opZoneWarn = 1
   var opZoneUnSafe = 2
 
-  var statsTimeoutInMilli: Long = 60*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
+  var statsTimeoutInMilli: Long = 120*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
   var heartbeatTimeoutInMilli: Long = 20*1000
   var resetNumInstances = 2 
   var minResetTimeInMilli = 3*1000
@@ -195,6 +197,11 @@ class InvokerRunningState(var numInFlightReqs: Int,var lastUsed: Long,var invoke
 }
 // the stats of an action across all invokers. Tracked per Invoker.
 class ActionStats(val actionName:String,logging: Logging){
+  //var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
+  // Assuming that usedInvokers will be needed by everyone -- getUsedInvoker, getActiveInvoker, isProactiveNeeded. 
+  // So, doing it one at a time is OK, because, typically it takes about 2 ms for the schedule decision, waiting that much won't hurt (atleast in 4 invoker's case)
+  //var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
+
   var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
   var lastInstantUsed = mutable.Map.empty[InvokerInstanceId, Long]
   var cmplxLastInstUsed = mutable.Map.empty[InvokerInstanceId, InvokerRunningState]
