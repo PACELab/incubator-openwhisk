@@ -230,33 +230,31 @@ class ActionStats(val actionName:String,logging: Logging){
     //var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank < _._2.invokerRank):_*) // OG-AUTOSCALE!
     var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank > _._2.invokerRank):_*)
 
-    rwLock.synchronized{
-      rankOrderedInvokers.keys.foreach{
-        curInvoker =>
-        var curInvokerRunningState = cmplxLastInstUsed(curInvoker)
-        usedInvokers.get(curInvoker) match {
-          case Some(curInvokerStats) => 
-            val curInvokerRunningState: InvokerRunningState = cmplxLastInstUsed(curInvoker)
-            logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName}, invoker: ${curInvokerRunningState.invokerRank} was the invoker used at ${curInvokerRunningState.lastUsed} and had #inflight-reqs: ${curInvokerRunningState.numInFlightReqs} ")
-            logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
-            // If I fit, I will choose this.
-            // TODO: Change this so that I iterate based on some "ranking"
-            //var curInvokerStats: AdapativeInvokerStats = usedInvokers(curInvoker)
-            val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
-            if(decision){
-              var curInstant: Long = Instant.now.toEpochMilli
-              lastInstantUsed(curInvoker) = curInstant
+    rankOrderedInvokers.keys.foreach{
+    curInvoker =>
+      var curInvokerRunningState = cmplxLastInstUsed(curInvoker)
+      usedInvokers.get(curInvoker) match {
+        case Some(curInvokerStats) => 
+          val curInvokerRunningState: InvokerRunningState = cmplxLastInstUsed(curInvoker)
+          logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName}, invoker: ${curInvokerRunningState.invokerRank} was the invoker used at ${curInvokerRunningState.lastUsed} and had #inflight-reqs: ${curInvokerRunningState.numInFlightReqs} ")
+          logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName}, invoker: ${curInvoker.toInt} checking whether it has any capacityRemaining...")
+          // If I fit, I will choose this.
+          // TODO: Change this so that I iterate based on some "ranking"
+          //var curInvokerStats: AdapativeInvokerStats = usedInvokers(curInvoker)
+          val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
+          if(decision){
+            var curInstant: Long = Instant.now.toEpochMilli
+            lastInstantUsed(curInvoker) = curInstant
 
-              cmplxLastInstUsed(curInvoker).numInFlightReqs = numInFlightReqs
-              cmplxLastInstUsed(curInvoker).lastUsed = curInstant
+            cmplxLastInstUsed(curInvoker).numInFlightReqs = numInFlightReqs
+            cmplxLastInstUsed(curInvoker).lastUsed = curInstant
 
-              logging.info(this,s"\t <avs_debug> <gasUI> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
-              return Some(curInvoker)
-            } 
-          case None =>
-            logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
+            logging.info(this,s"\t <avs_debug> <gasUI> Invoker: ${curInvoker.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker)}")  
+            return Some(curInvoker)
+          } 
+        case None =>
+          logging.info(this,s"\t <avs_debug> <getUsedInvoker> Invoker: ${curInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
 
-        }
       }
     }
     logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName} did not get a used invoker :( :( ")
@@ -270,85 +268,81 @@ class ActionStats(val actionName:String,logging: Logging){
     val rankSortedInvokers = tempRankOrderedInvokers.keys.toList
     var mainLoopIdx = toCheckInvoker.toInt // assuming it starts from 0-index
 
-    rwLock.synchronized{
-      usedInvokers.get(toCheckInvoker) match {
-        case Some(curInvokerStats) => 
-          logging.info(this,s"\t <avs_debug> <IASPN> Action: ${actionName}, toCheckInvoker: ${toCheckInvoker.toInt} checking whether it requires proactive Spawning..")
-            // If I fit, I will choose this.
-          val (curInvokerNumContsToSpawn,decision) = curInvokerStats.checkInvokerActTypeOpZone(actionName,myProactiveMaxReqs)
-            
-          if(decision){ 
-            //var internalLoopIdx = -1 // // OG-AUTOSCALE!
-            var internalLoopIdx = rankSortedInvokers.size
-            rankSortedInvokers.foreach{
-              nextInvoker =>
-              internalLoopIdx-=1
-              //internalLoopIdx+=1  // OG-AUTOSCALE!
-              //if(internalLoopIdx>mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."  // OG-AUTOSCALE!
-              if(internalLoopIdx < mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."
-                logging.info(this,s"<avs_debug> <IASPN> 0.0 toCheckInvoker: ${toCheckInvoker.toInt} internalLoopIdx: ${internalLoopIdx} checking whether I can issue dummy req to nextInvoker: ${nextInvoker.toInt} ")
-                usedInvokers.get(nextInvoker) match {
-                  case Some(nextInvokerStats) =>
-                    //val (actualNumDummyReqs,canIssueDummyReqs) = canIssueDummyReqToInvoker(proactiveInvoker,action.name.asString,schedulingState.numProactiveContsToSpawn)
-                    // canDummyReqBeIssued(actionName: String,numDummyReqs: Int)
-                    val (nextInvokerNumDummyReqsToIssue,nextInvokerDummyReqDecision) = nextInvokerStats.canDummyReqBeIssued(actionName,nextInvokerMaxProactiveReqs)
-                    if(nextInvokerDummyReqDecision){
-                      logging.info(this,s"\t <avs_debug> <IASPN> 1.0 toCheckInvoker: ${toCheckInvoker.toInt} nextInvoker: ${nextInvoker.toInt} can accommodate ${nextInvokerNumDummyReqsToIssue} dummy reqs")  
-                      return (nextInvoker,nextInvokerNumDummyReqsToIssue,curInvokerNumContsToSpawn,decision)
-                    }else{
-                      logging.info(this,s"\t <avs_debug> <IASPN> 1.5 toCheckInvoker: ${toCheckInvoker.toInt} nextInvoker: ${nextInvoker.toInt} WON'T or CAN'T accommodate ${nextInvokerNumDummyReqsToIssue} dummy reqs")  
-                    }
-                  case None =>
-                    logging.info(this,s"\t <avs_debug> <IASPN> 2.0 toCheckInvoker: ${toCheckInvoker.toInt} supposedly needs proactive cont but couldn't locate nextInvoker: ${nextInvoker.toInt}'s stats' ")
-                    return (toCheckInvoker,0,0,false)    
-                }
-              }else
-                logging.info(this,s"\t <avs_debug> <IASPN> 0.5 curIter: ${internalLoopIdx}'s invoker: ${nextInvoker.toInt} earlier than toCheckInvoker: ${toCheckInvoker.toInt} ")
+    usedInvokers.get(toCheckInvoker) match {
+      case Some(curInvokerStats) => 
+        logging.info(this,s"\t <avs_debug> <IASPN> Action: ${actionName}, toCheckInvoker: ${toCheckInvoker.toInt} checking whether it requires proactive Spawning..")
+          // If I fit, I will choose this.
+        val (curInvokerNumContsToSpawn,decision) = curInvokerStats.checkInvokerActTypeOpZone(actionName,myProactiveMaxReqs)
+          
+        if(decision){ 
+          //var internalLoopIdx = -1 // // OG-AUTOSCALE!
+          var internalLoopIdx = rankSortedInvokers.size
+          rankSortedInvokers.foreach{
+            nextInvoker =>
+            internalLoopIdx-=1
+            //internalLoopIdx+=1  // OG-AUTOSCALE!
+            //if(internalLoopIdx>mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."  // OG-AUTOSCALE!
+            if(internalLoopIdx < mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."
+              logging.info(this,s"<avs_debug> <IASPN> 0.0 toCheckInvoker: ${toCheckInvoker.toInt} internalLoopIdx: ${internalLoopIdx} checking whether I can issue dummy req to nextInvoker: ${nextInvoker.toInt} ")
+              usedInvokers.get(nextInvoker) match {
+                case Some(nextInvokerStats) =>
+                  //val (actualNumDummyReqs,canIssueDummyReqs) = canIssueDummyReqToInvoker(proactiveInvoker,action.name.asString,schedulingState.numProactiveContsToSpawn)
+                  // canDummyReqBeIssued(actionName: String,numDummyReqs: Int)
+                  val (nextInvokerNumDummyReqsToIssue,nextInvokerDummyReqDecision) = nextInvokerStats.canDummyReqBeIssued(actionName,nextInvokerMaxProactiveReqs)
+                  if(nextInvokerDummyReqDecision){
+                    logging.info(this,s"\t <avs_debug> <IASPN> 1.0 toCheckInvoker: ${toCheckInvoker.toInt} nextInvoker: ${nextInvoker.toInt} can accommodate ${nextInvokerNumDummyReqsToIssue} dummy reqs")  
+                    return (nextInvoker,nextInvokerNumDummyReqsToIssue,curInvokerNumContsToSpawn,decision)
+                  }else{
+                    logging.info(this,s"\t <avs_debug> <IASPN> 1.5 toCheckInvoker: ${toCheckInvoker.toInt} nextInvoker: ${nextInvoker.toInt} WON'T or CAN'T accommodate ${nextInvokerNumDummyReqsToIssue} dummy reqs")  
+                  }
+                case None =>
+                  logging.info(this,s"\t <avs_debug> <IASPN> 2.0 toCheckInvoker: ${toCheckInvoker.toInt} supposedly needs proactive cont but couldn't locate nextInvoker: ${nextInvoker.toInt}'s stats' ")
+                  return (toCheckInvoker,0,0,false)    
+              }
+            }else
+              logging.info(this,s"\t <avs_debug> <IASPN> 0.5 curIter: ${internalLoopIdx}'s invoker: ${nextInvoker.toInt} earlier than toCheckInvoker: ${toCheckInvoker.toInt} ")
 
-            }
-            // can just return true for myself and atleast issue proactive invokers in myself..
-            logging.info(this,s"\t <avs_debug> <IASPN> 2.5 toCheckInvoker: ${toCheckInvoker.toInt} supposedly needs proactive cont but couldn't locate nextInvoker stats'. Will issues ${curInvokerNumContsToSpawn} dummy reqs to myself! ")
-            return (toCheckInvoker,0,curInvokerNumContsToSpawn,decision)
           }
-          else{
-            logging.info(this,s"\t <avs_debug> <IASPN> 3.0 Invoker: ${toCheckInvoker.toInt} supposedly does NOT and size of rankSortedInvokers: ${rankSortedInvokers.size}")  
-            // anyway won't spawn an invoker..
-            return (toCheckInvoker,0,0,false)
-          }
-        case None =>
-            logging.info(this,s"\t <avs_debug> <IASPN> 4.0 Invoker: ${toCheckInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
+          // can just return true for myself and atleast issue proactive invokers in myself..
+          logging.info(this,s"\t <avs_debug> <IASPN> 2.5 toCheckInvoker: ${toCheckInvoker.toInt} supposedly needs proactive cont but couldn't locate nextInvoker stats'. Will issues ${curInvokerNumContsToSpawn} dummy reqs to myself! ")
+          return (toCheckInvoker,0,curInvokerNumContsToSpawn,decision)
+        }
+        else{
+          logging.info(this,s"\t <avs_debug> <IASPN> 3.0 Invoker: ${toCheckInvoker.toInt} supposedly does NOT and size of rankSortedInvokers: ${rankSortedInvokers.size}")  
+          // anyway won't spawn an invoker..
+          return (toCheckInvoker,0,0,false)
+        }
+      case None =>
+          logging.info(this,s"\t <avs_debug> <IASPN> 4.0 Invoker: ${toCheckInvoker.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
 
-      }
     }
     // anyway won't spawn an invoker..
     (toCheckInvoker,0,0,false)
   }
 
   def getActiveInvoker(activeInvokers: ListBuffer[InvokerHealth]): Option[InvokerInstanceId] = {
-    rwLock.synchronized{
-      activeInvokers.foreach{
-        curInvoker => 
-        usedInvokers.get(curInvoker.id) match {
-          case Some(curInvokerStats) => 
-            logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName}, invoker: ${curInvoker.id.toInt} checking whether it has any capacityRemaining...")
-            // If I fit, I will choose this.
-            // TODO: Change this so that I iterate based on some "ranking"
-            val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
-            if(decision){
+    activeInvokers.foreach{
+      curInvoker => 
+      usedInvokers.get(curInvoker.id) match {
+        case Some(curInvokerStats) => 
+          logging.info(this,s"\t <avs_debug> <getActiveInvoker> Action: ${actionName}, invoker: ${curInvoker.id.toInt} checking whether it has any capacityRemaining...")
+          // If I fit, I will choose this.
+          // TODO: Change this so that I iterate based on some "ranking"
+          val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
+          if(decision){
 
-              var curInstant: Long = Instant.now.toEpochMilli
-              lastInstantUsed(curInvoker.id) = curInstant
+            var curInstant: Long = Instant.now.toEpochMilli
+            lastInstantUsed(curInvoker.id) = curInstant
 
-              cmplxLastInstUsed(curInvoker.id).numInFlightReqs = numInFlightReqs
-              cmplxLastInstUsed(curInvoker.id).lastUsed = curInstant            
+            cmplxLastInstUsed(curInvoker.id).numInFlightReqs = numInFlightReqs
+            cmplxLastInstUsed(curInvoker.id).lastUsed = curInstant            
 
-              logging.info(this,s"\t <avs_debug> <getActiveInvoker> Invoker: ${curInvoker.id.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker.id)}")  
+            logging.info(this,s"\t <avs_debug> <getActiveInvoker> Invoker: ${curInvoker.id.toInt} supposedly has capacity, am I yielding at instant: ${curInstant}, lastInstantUsed(curInvoker): ${lastInstantUsed(curInvoker.id)}")  
 
-              return Some(curInvoker.id)
-            }
-          case None =>
-            logging.info(this,s"\t <avs_debug> <getActiveInvoker> Invoker: ${curInvoker.id.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
-        }
+            return Some(curInvoker.id)
+          }
+        case None =>
+          logging.info(this,s"\t <avs_debug> <getActiveInvoker> Invoker: ${curInvoker.id.toInt}'s AdapativeInvokerStats object, not yet passed onto the action. So, not doing anything with it..")
       }
     }
     // if it has come here, then I don't have anything..     
@@ -613,42 +607,57 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var myTypeConts = numConts(actType)  
     var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
     var adjustedDummyReqs = 0
-
-    if(myConts==0){
-      adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt - myTypeConts)
-    }else{
-      // WARNING: Assuming that if I have a container, then the inflight reqs would be serviced by them. 
-      //          Will definitely underestimate those scenarios where, the inflight reqs might result in spawning more containers and hence, overshooting the adjustedDummyReqs! 
-      //          Hoping that these instances are rare. Ideally the proactive spawning should prevent such situations from happening apart from the warmup time.
-      adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - myTypeConts)
-    }
-
-    if(adjustedDummyReqs == 0 ){
-      // no space available yo! 
-      retVal = false
-      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 1. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
-    }else if(myTypeConts<= maxInFlightReqsByType(actType)){
-      // so there is some space for requests & containers.!
-
-      adjustedDummyReqs = if(adjustedDummyReqs > numDummyReqs) numDummyReqs else adjustedDummyReqs
-
-      if(adjustedDummyReqs>0){
-        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2. A dummy action to invoker-${id.toInt} WILL be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
-        retVal = true
+    var iterNum = 0; var maxIters = 5; var beginInFlightReqs = 0
+    while(iterNum<maxIters){
+      iterNum+=1
+      beginInFlightReqs = inFlightReqsByType(actType)
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 0. Invoker being inspected-${id.toInt}, iter: ${iterNum} inFlightReqsByType is ${beginInFlightReqs}")
+      if(myConts==0){
+        adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt - myTypeConts)
+      }else{
+        // WARNING: Assuming that if I have a container, then the inflight reqs would be serviced by them. 
+        //          Will definitely underestimate those scenarios where, the inflight reqs might result in spawning more containers and hence, overshooting the adjustedDummyReqs! 
+        //          Hoping that these instances are rare. Ideally the proactive spawning should prevent such situations from happening apart from the warmup time.
+        adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - myTypeConts)
       }
-      else{
-        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2.5 A dummy action to invoker-${id.toInt} WILL-NOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+
+      if(adjustedDummyReqs == 0 ){
+        // no space available yo! 
         retVal = false
+        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 1. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
+      }else if(myTypeConts<= maxInFlightReqsByType(actType)){
+        // so there is some space for requests & containers.!
+
+        adjustedDummyReqs = if(adjustedDummyReqs > numDummyReqs) numDummyReqs else adjustedDummyReqs
+
+        if(adjustedDummyReqs>0){
+          logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2. A dummy action to invoker-${id.toInt} WILL be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+          retVal = true
+        }
+        else{
+          logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2.5 A dummy action to invoker-${id.toInt} WILL-NOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+          retVal = false
+        }
+        
+      }else{
+        retVal = false
+        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 3. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
       }
       
-    }else{
-      retVal = false
-      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 3. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
-    }
-    if(retVal){
-      if(adjustedDummyReqs>0){
-        //inFlightReqsByType.replace(actType,inFlightReqsByType(actType),inFlightReqsByType(actType)+adjustedDummyReqs) 
-        inFlightReqsByType(actType)= inFlightReqsByType(actType) + adjustedDummyReqs
+      if(retVal){
+        if(adjustedDummyReqs>0){
+          if(inFlightReqsByType(actType) == beginInFlightReqs){
+            logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 4. Invoker-${id.toInt} inFlightReqsByType is ${inFlightReqsByType(actType)} will have ${adjustedDummyReqs} more requests.")
+            inFlightReqsByType(actType)= inFlightReqsByType(actType) + adjustedDummyReqs  
+            iterNum+=maxIters
+          }else{
+            logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 4. Invoker-${id.toInt} inFlightReqsByType: ${beginInFlightReqs} changed to is ${inFlightReqsByType(actType)} during this op..")
+          }
+        }else{
+          iterNum+=maxIters
+        }
+      }else{
+        iterNum+=maxIters
       }
     }
 
