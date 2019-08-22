@@ -7,7 +7,7 @@ ansible ansible_connection=local
 172.24.38.105       ansible_host=172.24.38.105
 
 [edge]
-172.24.133.42       ansible_host=172.24.133.42
+172.24.66.133       ansible_host=172.24.66.133
 
 [apigateway:children]
 edge
@@ -25,7 +25,7 @@ edge
 kafkas
 
 [invokers]
-serverless-1  ansible_host=serverless-1
+serverless-8  ansible_host=serverless-8
 serverless-7  ansible_host=serverless-7
 serverless-3  ansible_host=serverless-3    
 serverless-4  ansible_host=serverless-4    

@@ -625,9 +625,10 @@ class ContainerProxy(
         if(job.msg.proactiveSpawning){
           logging.info(this, s"<avs_debug> <ContainerProxy> <initializeAndRun> activation: ${job.msg.activationId} of action: ${job.action.name} is proactiveSpawning"); //avs 
           logging.info(this, s"<initializeAndRun> caught expected proactiveSpawning while running activation: ${job.msg.activationId} of action: ${job.action.name}. Won't Run anything here..")
+          val initRunInterval = initInterval
           Future.successful(ContainerProxy.constructWhiskActivation(
             job,
-            None,
+            initInterval,
             Interval.zero,
             false,
             ActivationResponse.success(None)))         

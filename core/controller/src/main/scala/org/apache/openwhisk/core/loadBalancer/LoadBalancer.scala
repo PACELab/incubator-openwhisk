@@ -26,18 +26,13 @@ import org.apache.openwhisk.core.connector._
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.spi.Spi
 import scala.concurrent.duration._
-// avs --beging
 import scala.collection.mutable //avs
 import scala.collection.immutable //avs
 import scala.collection.mutable.ListBuffer //avs
 import java.time.Instant // avs
 import scala.collection.immutable.ListMap // avs
 //import util.control.Breaks._ // avs
-//import java.util.concurrent.atomic.AtomicReference
-//import java.util.concurrent.ConcurrentMap
-import java.util.concurrent.ConcurrentHashMap
-//import java.util.concurrent.ConcurrentMap
-
+// avs --begin
 
 class functionInfo {
   // avs --begin
@@ -104,7 +99,7 @@ class functionInfo {
   var opZoneWarn = 1
   var opZoneUnSafe = 2
 
-  var statsTimeoutInMilli: Long = 120*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
+  var statsTimeoutInMilli: Long = 60*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
   var heartbeatTimeoutInMilli: Long = 20*1000
   var resetNumInstances = 2 
   var minResetTimeInMilli = 3*1000
@@ -190,7 +185,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
         opZoneUpdate()      
     }
     numConts = toUpdateNumConts
-    logging.info(this,s"\t <avs_debug> <ASPI:update> In update of Action: ${actionName} myInvokerID: ${myInvokerID}, initTime: ${initTime} latency: ${latency} count: ${runningCount} cumulSum: ${cumulSum} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} opZone: ${opZone} ")     
+    logging.info(this,s"\t <avs_debug> <ASPI:update> In update of Action: ${actionName} myInvokerID: ${myInvokerID}, latency: ${latency} count: ${runningCount} cumulSum: ${cumulSum} movingAvgLatency: ${movingAvgLatency} numConts: ${numConts} opZone: ${opZone} ")     
   }
 
 }
@@ -200,12 +195,12 @@ class InvokerRunningState(var numInFlightReqs: Int,var lastUsed: Long,var invoke
 }
 // the stats of an action across all invokers. Tracked per Invoker.
 class ActionStats(val actionName:String,logging: Logging){
-  var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]  
+  var usedInvokers = mutable.Map.empty[InvokerInstanceId, AdapativeInvokerStats]
   var lastInstantUsed = mutable.Map.empty[InvokerInstanceId, Long]
   var cmplxLastInstUsed = mutable.Map.empty[InvokerInstanceId, InvokerRunningState]
-  private[this] val rwLock = new Object
 
   def addActionStats(invoker: InvokerInstanceId,invokerStats:AdapativeInvokerStats,latencyVal: Long,initTime: Long, toUpdateNumConts: Int){
+    
     usedInvokers.get(invoker) match{
       case Some(curInvokerStats) =>
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is PRESENT. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} initTime: ${initTime}")
@@ -222,7 +217,7 @@ class ActionStats(val actionName:String,logging: Logging){
 
         logging.info(this,s"\t <avs_debug> <ActionStats> <addActionStats> Action: ${actionName}, invoker: ${invoker.toInt} is ABSENT, adding it to usedInvokers. NumConts: ${toUpdateNumConts} and avgLat: ${latencyVal} at instant: ${curInstant} initTime: ${initTime}")
         tempInvokerStats.updateActionStats(actionName,latencyVal,initTime,toUpdateNumConts)
-    }      
+    }
   } 
 
   def getAutoScaleUsedInvoker(): Option[InvokerInstanceId] = {
@@ -231,7 +226,7 @@ class ActionStats(val actionName:String,logging: Logging){
     var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank > _._2.invokerRank):_*)
 
     rankOrderedInvokers.keys.foreach{
-    curInvoker =>
+      curInvoker =>
       var curInvokerRunningState = cmplxLastInstUsed(curInvoker)
       usedInvokers.get(curInvoker) match {
         case Some(curInvokerStats) => 
@@ -384,13 +379,9 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   allActionsByType = allActionsByType + ("ET" -> mutable.Map.empty[String,Int])
   allActionsByType = allActionsByType + ("MP" -> mutable.Map.empty[String,Int])
 
-  //var inFlightReqsByType = mutable.Map.empty[String, Int]
-  //var inFlightReqsByType = new ConcurrentHashMap[String,Int]() 
-  //inFlightReqsByType.putIfAbsent("ET",0) ; inFlightReqsByType.putIfAbsent("MP",0)
-
   var inFlightReqsByType = mutable.Map.empty[String, Int]
-  inFlightReqsByType = inFlightReqsByType + ("ET" -> 0); inFlightReqsByType = inFlightReqsByType + ("MP" -> 0)
-  var tempInFlightReqsBytType = new ConcurrentHashMap[String,Int]()
+  inFlightReqsByType = inFlightReqsByType + ("ET" -> 0)
+  inFlightReqsByType = inFlightReqsByType + ("MP" -> 0)
 
   var statsUpdatedByAction = mutable.Map.empty[String,Long] // timestamp of last action..
 
@@ -448,10 +439,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var actType = getActionType(toUpdateAction)
     var bef_pendingReqs = inFlightReqsByType(actType)
     var after_pendingReqs = if(bef_pendingReqs > 0)  bef_pendingReqs-1 else 0
-    
-    //inFlightReqsByType.replace("ET",inFlightReqsByType(actType),after_pendingReqs)// ok will have an outstanding request of my type..
-    inFlightReqsByType(actType) = after_pendingReqs
-
+    inFlightReqsByType(actType) = after_pendingReqs // ok will have an outstanding request of my type..
     allActions.get(toUpdateAction) match {
       case Some(curActStats) => 
         curActStats.update(latencyVal,initTime,toUpdateNumConts)
@@ -591,9 +579,11 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     }else{
       logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> NOPE. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }
+    
     if(curInvokerNumContsToSpawn>0){
-      //inFlightReqsByType.replace(actType,inFlightReqsByType(actType),inFlightReqsByType(actType)+curInvokerNumContsToSpawn)
+      curInvokerNumContsToSpawn = if(curInvokerNumContsToSpawn > myProactiveMaxReqs) myProactiveMaxReqs else curInvokerNumContsToSpawn
       inFlightReqsByType(actType) = inFlightReqsByType(actType)+curInvokerNumContsToSpawn
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ:END> invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}, inFlightReqsByType(actType)")  
     }
     (curInvokerNumContsToSpawn,nextInvokerSpawnDecision)
   }
@@ -608,71 +598,55 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
     var adjustedDummyReqs = 0
     var iterNum = 0; var maxIters = 5; var beginInFlightReqs = 0
-    while(iterNum<maxIters){
-      iterNum+=1
-      beginInFlightReqs = inFlightReqsByType(actType)
-      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 0. Invoker being inspected-${id.toInt}, iter: ${iterNum} inFlightReqsByType is ${beginInFlightReqs}")
-      if(myConts==0){
-        adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt - myTypeConts)
-      }else{
-        // WARNING: Assuming that if I have a container, then the inflight reqs would be serviced by them. 
-        //          Will definitely underestimate those scenarios where, the inflight reqs might result in spawning more containers and hence, overshooting the adjustedDummyReqs! 
-        //          Hoping that these instances are rare. Ideally the proactive spawning should prevent such situations from happening apart from the warmup time.
-        adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - myTypeConts)
-      }
 
-      if(adjustedDummyReqs == 0 ){
-        // no space available yo! 
-        retVal = false
-        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 1. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
-      }else if(myTypeConts<= maxInFlightReqsByType(actType)){
-        // so there is some space for requests & containers.!
-
-        adjustedDummyReqs = if(adjustedDummyReqs > numDummyReqs) numDummyReqs else adjustedDummyReqs
-
-        if(adjustedDummyReqs>0){
-          logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2. A dummy action to invoker-${id.toInt} WILL be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
-          retVal = true
-        }
-        else{
-          logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2.5 A dummy action to invoker-${id.toInt} WILL-NOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
-          retVal = false
-        }
-        
-      }else{
-        retVal = false
-        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 3. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
-      }
-      
-      if(retVal){
-        if(adjustedDummyReqs>0){
-          if(inFlightReqsByType(actType) == beginInFlightReqs){
-            logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 4. Invoker-${id.toInt} inFlightReqsByType is ${inFlightReqsByType(actType)} will have ${adjustedDummyReqs} more requests.")
-            inFlightReqsByType(actType)= inFlightReqsByType(actType) + adjustedDummyReqs  
-            iterNum+=maxIters
-          }else{
-            logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 4. Invoker-${id.toInt} inFlightReqsByType: ${beginInFlightReqs} changed to is ${inFlightReqsByType(actType)} during this op..")
-          }
-        }else{
-          iterNum+=maxIters
-        }
-      }else{
-        iterNum+=maxIters
-      }
+    if(myConts==0){
+      adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt - myTypeConts)
+    }else{
+      // WARNING: Assuming that if I have a container, then the inflight reqs would be serviced by them. 
+      //          Will definitely underestimate those scenarios where, the inflight reqs might result in spawning more containers and hence, overshooting the adjustedDummyReqs! 
+      //          Hoping that these instances are rare. Ideally the proactive spawning should prevent such situations from happening apart from the warmup time.
+      adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - myTypeConts)
     }
 
+    if(adjustedDummyReqs == 0 ){
+      // no space available yo! 
+      retVal = false
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 1. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
+    }else if(myTypeConts<= maxInFlightReqsByType(actType)){
+        // so there is some space for requests & containers.!
+
+      adjustedDummyReqs = if(adjustedDummyReqs > numDummyReqs) numDummyReqs else adjustedDummyReqs
+
+      if(adjustedDummyReqs>0){
+        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2. A dummy action to invoker-${id.toInt} WILL be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+        retVal = true
+      }
+      else{
+        logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 2.5 A dummy action to invoker-${id.toInt} WILL-NOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+        retVal = false
+      }
+        
+    }else{
+      retVal = false
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 3. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} adjustedDummyReqs: ${adjustedDummyReqs}")
+    }
+
+    if(adjustedDummyReqs>0){
+      inFlightReqsByType(actType)= inFlightReqsByType(actType) + adjustedDummyReqs  
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 4. Invoker-${id.toInt} inFlightReqsByType is ${beginInFlightReqs} will have ${adjustedDummyReqs} more requests. So inFlightReqsByType(actType)")
+    }
     (adjustedDummyReqs,retVal)
   }
 
-  /*def issuedSomeDummyReqs(actionName: String, issuedNumDummyReqs: Int): Unit = {
+  def issuedSomeDummyReqs(actionName: String, issuedNumDummyReqs: Int): Unit = {
     var actType = getActionType(actionName)
-    inFlightReqsByType.replace(actType,inFlightReqsByType(actType)+issuedNumDummyReqs) 
+    inFlightReqsByType(actType)+=issuedNumDummyReqs
     if( inFlightReqsByType(actType) > maxInFlightReqsByType(actType) ){
-      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 1. DANGER DANGER In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} are more than the maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
+      logging.info(this,s"\t <avs_debug> <AIS:issueDummyReq> 1. DANGER DANGER In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} are more than the maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
     }else{
       logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 2. ALL-COOL In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} is less than maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
     }
-  }*/
+  }
 
   def capacityRemaining(actionName:String): (Int,Boolean) = { // should update based on -- memory; #et, #mp and operating zone
     // 1. Check action-type. Alternatively, can send this as a parameter from the schedule-method
@@ -699,10 +673,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       // No way JOSE!
       retVal = false
     }
-    if(retVal) {
-      inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
-      //inFlightReqsByType.replace(actType,inFlightReqsByType(actType),inFlightReqsByType(actType)+1) 
-    }
+    if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
 
     logging.info(this,s"\t <avs_debug> <AIS:capRem> Final. invoker: ${id.toInt} has action: ${actionName} of type: ${actType} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
     (inFlightReqsByType(actType),retVal)
