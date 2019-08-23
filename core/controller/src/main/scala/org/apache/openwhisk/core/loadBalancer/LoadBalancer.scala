@@ -407,7 +407,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     //maxInFlightReqs_ET = 1.5 * myResources.numCores
     //maxInFlightReqs_MP = 1.0 * myResources.numCores
 
-    maxInFlightReqsByType = maxInFlightReqsByType + ("ET" -> 1.5 * myResources.numCores)
+    maxInFlightReqsByType = maxInFlightReqsByType + ("ET" -> 1.0 * myResources.numCores)
     maxInFlightReqsByType = maxInFlightReqsByType + ("MP" -> 1.0 * myResources.numCores)
 
   }
