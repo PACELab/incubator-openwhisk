@@ -41,6 +41,7 @@ import org.apache.openwhisk.spi.SpiLoader
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
+import util.control.Breaks._ //avs
 
 /**
  * A loadbalancer that schedules workload based on a hashing-algorithm.
@@ -260,9 +261,16 @@ class RoundRobinContainerPoolBalancer(
 
     val isBlackboxInvocation = action.exec.pull
     val actionType = if (!isBlackboxInvocation) "managed" else "blackbox"
+    // Commenting for shortcircuiting and running single node experiments.
     val (invokersToUse, stepSizes) =
       if (!isBlackboxInvocation) (schedulingState.managedInvokers, schedulingState.managedStepSizes)
       else (schedulingState.blackboxInvokers, schedulingState.blackboxStepSizes)
+    
+
+    /*// Short circuiting and running single node experiments.
+    val invokersToUse = schedulingState.singleInvoker
+    val stepSizes = 1 */
+
     val chosen = if (invokersToUse.nonEmpty) {
       val hash = RoundRobinContainerPoolBalancer.generateHash(msg.user.namespace.name, action.fullyQualifiedName(false))
       // avs --begin
@@ -486,6 +494,9 @@ case class RoundRobinContainerPoolBalancerState(
   def invokerSlots: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]] = _invokerSlots
   def clusterSize: Int = _clusterSize
 
+  //var aipmInit: Boolean = false
+  //var _singleInvoker = IndexedSeq[InvokerHealth] = IndexedSeq.empty[InvokerHealth]
+  //def singleInvoker: IndexedSeq[InvokerHealth] = _singleInvoker
   /**
    * @param memory
    * @return calculated invoker slot
@@ -543,6 +554,21 @@ case class RoundRobinContainerPoolBalancerState(
       this,
       s"loadbalancer invoker status updated. managedInvokers = $managed blackboxInvokers = $blackboxes")(
       TransactionId.loadbalancer)
+
+/*
+// avs --begin
+    if(!aipmInit){
+      logging.info(this,s"<avs_debug>, now populating, curInvokerPoolMaintenance object! ")
+      _invokers.foreach {
+        curInvoker =>
+        _singleInvoker += curInvoker
+        break;
+      }    
+      logging.info(this,s"<avs_debug>, _singleInvoker.size: ${_singleInvoker.size} ")
+      aipmInit = true
+    }
+// avs --end             
+*/
   }
 
   /**
