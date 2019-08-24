@@ -301,8 +301,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} curRuntime: ${curRuntime} and numInvocations: ${numInvocations}")
-    //dummyCall()
-    checkCpuShares(curRuntime)
+    dummyCall()
+    //checkCpuShares(curRuntime)
     if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)){
       printAllCpuShares(logging)
     }
@@ -370,24 +370,24 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
   // avs --begin
   var trackContId = 0;
   // Assuming that this is called in the beginning ala container.
-  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->635.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->6350.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->18000.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->660.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->7240.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->19630.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1800.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->550.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->500.0)
   containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0.0)
   
   def addFunctionRuntime(functionName: String): Unit = {
     if(functionName == "imageResizing_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 635.0)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 660.0)  
     }else if (functionName == "rodinia_nn_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 6350.0)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 7240.0)  
     }else if (functionName == "euler3d_cpu_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000.0)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 19630.0)  
     }else if (functionName == "servingCNN_v1"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1800.0)  
     }else if (functionName =="realTimeAnalytics_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 550.0)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 500.0)  
     }
     else if (functionName == "invokerHealthTestAction0"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
@@ -437,7 +437,7 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
           if (hasPoolSpaceFor(busyPool, r.action.limits.memory.megabytes.MB)) {
             // Schedule a job to a warm container
             ContainerPool
-              .schedule(r.action, r.msg.user.namespace.name, freePool)
+              .schedule(r.action, r.msg.user.namespace.name, freePool,logging)
               .map(container => (container, container._2.initingState)) //warmed, warming, and warmingCold always know their state
               .orElse(
                 // There was no warm/warming/warmingCold container. Try to take a prewarm container or a cold container.
@@ -942,6 +942,7 @@ object ContainerPool {
    * @param idles a map of idle containers, awaiting work
    * @return a container if one found
    */
+  /* 
   protected[containerpool] def schedule[A](action: ExecutableWhiskAction,
                                            invocationNamespace: EntityName,
                                            idles: Map[A, ContainerData]): Option[(A, ContainerData)] = {
@@ -962,7 +963,75 @@ object ContainerPool {
           case _                                                                                  => false
         }
       }
+  } */
+
+  protected[containerpool] def schedule[A](action: ExecutableWhiskAction,
+                                           invocationNamespace: EntityName,
+                                           idles: Map[A, ContainerData],logging: AkkaLogging): Option[(A, ContainerData)] = {
+
+    idles.find {
+        case (_, c @ WarmedData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true
+
+        case (a,curCont) =>
+          curCont.getContainer match {
+            case Some(container) =>
+              if(curCont.initingState=="warmed"){
+                val castedContData = curCont.asInstanceOf[WarmedData]
+                val actionName = castedContData.action.name.name
+                // Fix-it: Only checking for action-name, should also incorporate version check. 
+                if( (actionName == action.name.name) && castedContData.hasCapacity() ){
+                  logging.info(this,s"<avs> <findCont:schedule> 1.5-P1-0 cont: ${container} castedContData.invocName: ${castedContData.invocationNamespace} actionName: ${actionName} invocationNamespace: ${`invocationNamespace`} lastUsed: ${curCont.lastUsed} initState: ${curCont.initingState} hasCapacity: ${castedContData.hasCapacity()}")  
+                  true
+                }else{
+                  logging.info(this,s"<avs> <findCont:schedule> 1.5-P1-1 cont: ${container} castedContData.invocName: ${castedContData.invocationNamespace} actionName: ${actionName} invocationNamespace: ${`invocationNamespace`} lastUsed: ${curCont.lastUsed} initState: ${curCont.initingState} hasCapacity: ${castedContData.hasCapacity()}")
+                  false
+                }
+                
+              }else{
+                logging.info(this,s"<avs> <findCont:schedule> 1.5-P2. cont: ${container} invocationNamespace: ${`invocationNamespace`} lastUsed: ${curCont.lastUsed} initState: ${curCont.initingState} hasCapacity: ${curCont.hasCapacity()}")  
+                false
+              }
+              //false
+            case None =>
+              logging.info(this,s"<avs> <findCont:schedule> 1.5-P3. cont: didnt-find lastUsed: ${curCont.lastUsed} initState: ${curCont.initingState} hasCapacity: ${curCont.hasCapacity()}")
+              false
+          }
+
+        case _ => false
+      }
+      .orElse {
+        idles.find {
+          case (_, c @ WarmingData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true
+          case _                                                                                 => false
+        }
+      }
+      .orElse {
+        idles.find {
+          case (_, c @ WarmingColdData(`invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true           
+          case _                                                                                  => false       
+      }
+    }
+
+    /*idles
+      .find {
+        case (_, c @ WarmedData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true
+        case _                                                                                => false
+      }
+      .orElse {
+        idles.find {
+          case (_, c @ WarmingData(_, `invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true
+          case _                                                                                 => false
+        }
+      }
+      .orElse {
+        idles.find {
+          case (_, c @ WarmingColdData(`invocationNamespace`, `action`, _, _)) if c.hasCapacity() => true
+          case _                                                                                  => false
+        }
+      }
+    */
   }
+
 
   /**
    * Finds the oldest previously used container to remove to make space for the job passed to run.
