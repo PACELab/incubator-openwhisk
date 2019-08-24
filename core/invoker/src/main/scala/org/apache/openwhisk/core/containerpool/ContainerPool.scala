@@ -149,10 +149,10 @@ class TrackFunctionStats(
         //myContainers = myContainers + (container -> 0) // will reset it, but doesnt matter.
     }
 
-    if(myContainers.size==0){
+    /*if(myContainers.size==0){
       logging.info(this, s"<avs_debug> <TrackFunctionStats> <removeContainer> for action: ${actionName} don't have any containers. Will reset curCpuSharesto defaultCpuShares: ${defaultCpuShares} ")
       curCpuShares = defaultCpuShares // can set this to most-used-cpu-shares
-    }
+    }*/
   }
 
 
@@ -301,8 +301,8 @@ class TrackFunctionStats(
     cumulRuntime+= curRuntime
     numInvocations+=1
     //logging.info(this, s"<avs_debug> <TrackFunctionStats> <addRuntime> for action: ${actionName} cumulRuntime: ${cumulRuntime} curRuntime: ${curRuntime} and numInvocations: ${numInvocations}")
-    dummyCall()
-    //checkCpuShares(curRuntime)
+    //dummyCall()
+    checkCpuShares(curRuntime)
     if(curCpuSharesUsed==(curCpuSharesUpdate_Threshold-1)){
       printAllCpuShares(logging)
     }
