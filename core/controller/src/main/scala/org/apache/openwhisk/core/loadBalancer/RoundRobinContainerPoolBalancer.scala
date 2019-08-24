@@ -41,7 +41,7 @@ import org.apache.openwhisk.spi.SpiLoader
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
-import util.control.Breaks._ //avs
+//import util.control.Breaks._ //avs
 
 /**
  * A loadbalancer that schedules workload based on a hashing-algorithm.

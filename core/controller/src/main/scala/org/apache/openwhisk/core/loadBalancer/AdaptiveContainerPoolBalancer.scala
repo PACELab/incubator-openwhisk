@@ -127,7 +127,6 @@ class AdaptiveInvokerPoolMaintenance(var activeInvokers: ListBuffer[InvokerHealt
     logging.info(this,s"<avs_debug> <AIPM> <printSize> activeInvokers.size: ${activeInvokers.size} ")
     logging.info(this,s"<avs_debug> <AIPM> <printSize> inactiveInvokers.size: ${inactiveInvokers.size} ")
   }
-
 }
 // avs --end
 
@@ -638,8 +637,11 @@ case class AdaptiveContainerPoolBalancerState(
   def activeInvokersBuffer: ListBuffer[InvokerHealth] = _activeInvokersBuffer 
 
   var aipmInit: Boolean = false
+  var _allInvokersUsed: Boolean = false
   val numProactiveContsToSpawn = 2
   val curInvokerProactiveContsToSpawn = 1
+
+
   //def numProactiveContsToSpawn: Int = _numProactiveContsToSpawn; def curInvokerProactiveContsToSpawn: Int = _curInvokerProactiveContsToSpawn
 // avs --end
   /**

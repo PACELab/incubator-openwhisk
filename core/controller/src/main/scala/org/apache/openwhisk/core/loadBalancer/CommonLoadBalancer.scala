@@ -353,6 +353,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
   val aIT: aitype = (invoker: InvokerHealth,numCores:Int,memorySize:Int) => {
   //def addInvokerTracking(invoker: InvokerInstanceId,numCores:Int,memorySize:Int): Unit = {
     logging.info(this,s"<avs_debug> <addInvokerTracking> on invoker: ${invoker.id.toInt}")
+
     allInvokers.get(invoker.id) match {
       case Some(curInvokerStats) =>
         logging.info(this,s"<avs_debug> in <addInvokerTracking> invoker: ${invoker.id.toInt} is PRESENT in allInvokers ")
@@ -362,6 +363,33 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
         var tempInvokerStats = allInvokers(invoker.id)
         tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
       } 
+
+// add all the actions we want to track. 
+// shoddy implementation, but have to do for now.
+    var tempInvokerStats = allInvokers(invoker.id)
+    var actionsToAdd: ListBuffer[String] = new mutable.ListBuffer[String]
+    actionsToAdd+= "imageResizing_v1"
+    actionsToAdd+= "rodinia_nn_v1"
+    actionsToAdd+= "euler3d_cpu_v1"
+    actionsToAdd+= "servingCNN_v1"
+    actionsToAdd+= "realTimeAnalytics_v1"
+    actionsToAdd+= "invokerHealthTestAction0"
+
+    actionsToAdd.foreach {
+      curAction =>
+        curRunningActions.get(curAction) match {
+          case Some(curActStats) => 
+            logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is PRESENT in curRunningActions and it is being initialized for invoker: ${invoker.id.toInt}")
+            //curActStats.addActionStats(m.invoker,m.latency,m.numConts) // curActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
+            curActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0)
+          case None => 
+            logging.info(this,s"<avs_debug> <processLoadResponse> action: ${curAction} is ABSENT in curRunningActions  and it ran on invoker: ${invoker.id.toInt}")              
+            curRunningActions = curRunningActions + (curAction -> new ActionStats(curAction,logging))
+            //curRunningActions = curRunningActions + (m.curActName -> curInvokerStats)
+            var myActStats :ActionStats = curRunningActions(curAction)
+            myActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0) //myActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
+      }
+    }
   }  
    
   def getInvokerTracking(invoker: InvokerInstanceId): AdapativeInvokerStats = {

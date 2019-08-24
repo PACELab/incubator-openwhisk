@@ -37,24 +37,51 @@ import scala.collection.immutable.ListMap // avs
 class functionInfo {
   // avs --begin
   var containerStandaloneRuntime = immutable.Map.empty[String,Long] 
-  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->635)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->6350)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->18000)
+/*
+  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->660.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->7240.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->19630.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1800.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->500.0)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0.0)
+  
+  def addFunctionRuntime(functionName: String): Unit = {
+    if(functionName == "imageResizing_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 660.0)  
+    }else if (functionName == "rodinia_nn_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 7240.0)  
+    }else if (functionName == "euler3d_cpu_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 19630.0)  
+    }else if (functionName == "servingCNN_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1800.0)  
+    }else if (functionName =="realTimeAnalytics_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 500.0)  
+    }
+    else if (functionName == "invokerHealthTestAction0"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
+    }
+    
+  }  
+*/
+
+  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->660)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->7240)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->19630)
   containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1800)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->550)
+  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->750)
   containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0)
   
   def addFunctionRuntime(functionName: String): Unit = {
     if(functionName == "imageResizing_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 635)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 660)  
     }else if (functionName == "rodinia_nn_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 6350)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 7240)  
     }else if (functionName == "euler3d_cpu_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 18000)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 19630)  
     }else if (functionName == "servingCNN_v1"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1800)  
     }else if (functionName =="realTimeAnalytics_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 550)  
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 750)  
     }
     else if (functionName == "invokerHealthTestAction0"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350)  
@@ -224,7 +251,7 @@ class ActionStats(val actionName:String,logging: Logging){
     //var rankOrderedInvokers = cmplxLastInstUsed.toSeq.sortBy(curEle => (curEle._2.invokerRank)) //(Ordering[(Int,Long)].reverse)    
     // var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank > _._2.invokerRank):_*) // reversed-AUTOSCALE!
     var rankOrderedInvokers = ListMap(cmplxLastInstUsed.toSeq.sortWith(_._2.invokerRank < _._2.invokerRank):_*) // OG-AUTOSCALE!
-    
+
     rankOrderedInvokers.keys.foreach{
       curInvoker =>
       var curInvokerRunningState = cmplxLastInstUsed(curInvoker)
@@ -278,8 +305,8 @@ class ActionStats(val actionName:String,logging: Logging){
             nextInvoker =>
             //internalLoopIdx-=1 // reversed-AUTOSCALE!
             internalLoopIdx+=1  // OG-AUTOSCALE!
-            //if(internalLoopIdx>mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."  // OG-AUTOSCALE!
-            if(internalLoopIdx < mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."
+            if(internalLoopIdx>mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.."  // OG-AUTOSCALE!
+            //if(internalLoopIdx < mainLoopIdx){ // so all the invokers before me aren't used already for a reason--they are all busy, so will choose the next one.." // reversed-AUTOSCALE
               logging.info(this,s"<avs_debug> <IASPN> 0.0 toCheckInvoker: ${toCheckInvoker.toInt} internalLoopIdx: ${internalLoopIdx} checking whether I can issue dummy req to nextInvoker: ${nextInvoker.toInt} ")
               usedInvokers.get(nextInvoker) match {
                 case Some(nextInvokerStats) =>
