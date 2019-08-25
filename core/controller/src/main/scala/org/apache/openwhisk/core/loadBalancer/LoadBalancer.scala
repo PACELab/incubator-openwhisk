@@ -37,33 +37,6 @@ import scala.collection.immutable.ListMap // avs
 class functionInfo {
   // avs --begin
   var containerStandaloneRuntime = immutable.Map.empty[String,Long] 
-/*
-  containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->660.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->7240.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->19630.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("servingCNN_v1"->1800.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("realTimeAnalytics_v1"->500.0)
-  containerStandaloneRuntime = containerStandaloneRuntime + ("invokerHealthTestAction0"->0.0)
-  
-  def addFunctionRuntime(functionName: String): Unit = {
-    if(functionName == "imageResizing_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 660.0)  
-    }else if (functionName == "rodinia_nn_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 7240.0)  
-    }else if (functionName == "euler3d_cpu_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 19630.0)  
-    }else if (functionName == "servingCNN_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1800.0)  
-    }else if (functionName =="realTimeAnalytics_v1"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 500.0)  
-    }
-    else if (functionName == "invokerHealthTestAction0"){
-      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
-    }
-    
-  }  
-*/
-
   containerStandaloneRuntime = containerStandaloneRuntime + ("imageResizing_v1"->660)
   containerStandaloneRuntime = containerStandaloneRuntime + ("rodinia_nn_v1"->7240)
   containerStandaloneRuntime = containerStandaloneRuntime + ("euler3d_cpu_v1"->19630)
@@ -116,9 +89,9 @@ class functionInfo {
 
   var latencyTolerance = 1.15
   var safeBeginThreshold:Double = 0.0
-  var safeEndThreshold:Double = 0.5
+  var safeEndThreshold:Double = 0.4
   var warnBeginThreshold:Double = safeEndThreshold
-  var warnEndThreshold:Double = 0.75
+  var warnEndThreshold:Double = 0.60
   var unsafeBeginThreshold:Double = warnEndThreshold
   var unsafeEndThreshold:Double = 100000.0 
 
@@ -129,8 +102,8 @@ class functionInfo {
   var statsTimeoutInMilli: Long = 60*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
   var heartbeatTimeoutInMilli: Long = 20*1000
   var resetNumInstances = 2 
-  var minResetTimeInMilli = 3*1000
-  var movWindow_numReqs = 10
+  var minResetTimeInMilli = 1*1000
+  var movWindow_numReqs = 4
 // avs --end  
 }
 
@@ -634,13 +607,14 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
       // WARNING: Assuming that if I have a container, then the inflight reqs would be serviced by them. 
       //          Will definitely underestimate those scenarios where, the inflight reqs might result in spawning more containers and hence, overshooting the adjustedDummyReqs! 
       //          Hoping that these instances are rare. Ideally the proactive spawning should prevent such situations from happening apart from the warmup time.
-      adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - myTypeConts)
+      //adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - myTypeConts)
+      adjustedDummyReqs = ( maxInFlightReqsByType(actType).toInt - inFlightReqsByType(actType).toInt)
     }
 
     if(adjustedDummyReqs == 0 ){
       // no space available yo! 
       retVal = false
-      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 1. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)}")
+      logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 1. A dummy action to invoker-${id.toInt} CANNOT be issued.. in invoker: ${id.toInt}. inFlightReqsByType is ${inFlightReqsByType(actType)} myTypeConts: ${myTypeConts} myConts: ${myConts}")
     }else if(myTypeConts<= maxInFlightReqsByType(actType)){
         // so there is some space for requests & containers.!
 
@@ -663,6 +637,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     if(adjustedDummyReqs>0){
       inFlightReqsByType(actType)= inFlightReqsByType(actType) + adjustedDummyReqs  
       logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 4. Invoker-${id.toInt} inFlightReqsByType is ${beginInFlightReqs} will have ${adjustedDummyReqs} more requests. So inFlightReqsByType(actType)")
+      lastTime_ProactivelySpawned = Instant.now.toEpochMilli // doesn't matter who proactively spawned me, it makes sense to update it.
     }
     (adjustedDummyReqs,retVal)
   }

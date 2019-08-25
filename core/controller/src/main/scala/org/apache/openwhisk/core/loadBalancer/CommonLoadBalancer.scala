@@ -383,7 +383,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
             //curActStats.addActionStats(m.invoker,m.latency,m.numConts) // curActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
             curActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0)
           case None => 
-            logging.info(this,s"<avs_debug> <processLoadResponse> action: ${curAction} is ABSENT in curRunningActions  and it ran on invoker: ${invoker.id.toInt}")              
+            logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is ABSENT in curRunningActions  and it ran on invoker: ${invoker.id.toInt}")              
             curRunningActions = curRunningActions + (curAction -> new ActionStats(curAction,logging))
             //curRunningActions = curRunningActions + (m.curActName -> curInvokerStats)
             var myActStats :ActionStats = curRunningActions(curAction)
