@@ -89,9 +89,9 @@ class functionInfo {
 
   var latencyTolerance = 1.15
   var safeBeginThreshold:Double = 0.0
-  var safeEndThreshold:Double = 0.4
+  var safeEndThreshold:Double = 0.5
   var warnBeginThreshold:Double = safeEndThreshold
-  var warnEndThreshold:Double = 0.60
+  var warnEndThreshold:Double = 0.75
   var unsafeBeginThreshold:Double = warnEndThreshold
   var unsafeEndThreshold:Double = 100000.0 
 
@@ -103,7 +103,7 @@ class functionInfo {
   var heartbeatTimeoutInMilli: Long = 20*1000
   var resetNumInstances = 2 
   var minResetTimeInMilli = 1*1000
-  var movWindow_numReqs = 4
+  var movWindow_numReqs = 10
 // avs --end  
 }
 
@@ -116,7 +116,7 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
   var cumulSum: Long = 0
   var runningCount: Long = 0
   var actionType: String  = "MP" // ET or MessagingProvider
-  var opZone = 0 // 0: safe ( 0 to 50% of latency); 1: will reach un-safe soon, 2: unsafe
+  var opZone = opZoneSafe // 0: safe ( 0 to 50% of latency); 1: will reach un-safe soon, 2: unsafe
   var lastUpdated: Long = Instant.now.toEpochMilli
   // FIX-IT: should be more accurate (based on when responses come?) instead of estimates..
   var proactiveTimeoutInMilli: Long =  statsTimeoutInMilli + (10*1000) + (1*standaloneRuntime) 
@@ -158,11 +158,13 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
       val prevOpZone = opZone
       if(statsResetFlag && opZone == opZoneUnSafe){
         numConts = 1
+        opZone = opZoneWarn
       }else{
         numConts = 0
+        opZone = opZoneSafe
       }
 
-      opZone = 0 
+      
       movingAvgLatency = 0
       cumulSum = 0
       runningCount = 0
@@ -668,18 +670,23 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     logging.info(this,s"\t <avs_debug> <AIS:capRem> 0. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
     logging.info(this,s"\t <avs_debug> <AIS:capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
 
-    if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
+    var curInstanceMaxReqs =  maxInFlightReqsByType(actType) 
+    if (status_opZone == opZoneWarn) 
+      curInstanceMaxReqs =  0.5 * maxInFlightReqsByType(actType) 
+
+    //if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
+    if ( ( inFlightReqsByType(actType) < curInstanceMaxReqs) && (status_opZone!= opZoneUnSafe ) ){
       logging.info(this,s"\t <avs_debug> <AIS:capRem> myConts: ${myConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
       // ok, I don't have too many pending requests here..
       retVal = true
     }else{
-      logging.info(this,s"\t <avs_debug> <AIS:capRem> invoker: ${id.toInt} maxInFlightReqsByType(ET): ${maxInFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
+      logging.info(this,s"\t <avs_debug> <AIS:capRem> invoker: ${id.toInt} curInstanceMaxReqs(actType): ${curInstanceMaxReqs} numCores: ${myResources.numCores} status_opZone: ${status_opZone} myConts: ${myConts} ")
       // No way JOSE!
       retVal = false
     }
     if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
 
-    logging.info(this,s"\t <avs_debug> <AIS:capRem> Final. invoker: ${id.toInt} has action: ${actionName} of type: ${actType} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
+    logging.info(this,s"\t <avs_debug> <AIS:capRem> Final. invoker: ${id.toInt} has action: ${actionName} has curInstanceMaxReqs: ${curInstanceMaxReqs} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
     (inFlightReqsByType(actType),retVal)
   }
 
