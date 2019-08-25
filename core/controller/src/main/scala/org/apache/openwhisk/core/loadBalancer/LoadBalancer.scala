@@ -392,24 +392,22 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   // Instant.now.toEpochMilli
 
   var maxInFlightReqsByType = mutable.Map.empty[String, Double]
-  maxInFlightReqsByType = maxInFlightReqsByType + ("ET" -> 1.5 * myResources.numCores)
+  maxInFlightReqsByType = maxInFlightReqsByType + ("ET" -> 1.0 * myResources.numCores)
   maxInFlightReqsByType = maxInFlightReqsByType + ("MP" -> 1.0 * myResources.numCores)
 
+  var lastTime_ProactivelySpawnedByType = mutable.Map.empty[String,Long]
+  lastTime_ProactivelySpawnedByType = lastTime_ProactivelySpawnedByType + ("ET" -> 0)
+  lastTime_ProactivelySpawnedByType = lastTime_ProactivelySpawnedByType + ("MP" -> 0)
   // -------------- Thresholds --------------
-  //var maxInFlightReqs_ET = 1.5 * myResources.numCores
-  //var maxInFlightReqs_MP = 1.0 * myResources.numCores
   var warningZoneThd:Double = 0.5
   var maxProactiveNumConts: Int = 2
   var curNumProcactiveConts: Int = 0
-  var lastTime_ProactivelySpawned: Long = 0 //Instant.now.toEpochMilli
+  //var lastTime_ProactivelySpawned: Long = 0 //Instant.now.toEpochMilli
   // -------------- Thresholds --------------
 
   def updateInvokerResource(toSetNumCores:Int,toSetMemory: Int): Unit = {
     myResources.numCores = toSetNumCores
     myResources.memorySize = toSetMemory
-
-    //maxInFlightReqs_ET = 1.5 * myResources.numCores
-    //maxInFlightReqs_MP = 1.0 * myResources.numCores
 
     maxInFlightReqsByType = maxInFlightReqsByType + ("ET" -> 1.0 * myResources.numCores)
     maxInFlightReqsByType = maxInFlightReqsByType + ("MP" -> 1.0 * myResources.numCores)
@@ -541,7 +539,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
     var curInstant: Long = Instant.now.toEpochMilli
     //logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 0. invoker: ${id.toInt} action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone}  inFlightReqsByType(actType): ${ inFlightReqsByType(actType)} maxInFlightReqsByType(actType): ${maxInFlightReqsByType(actType)}  curNumProcactiveConts: ${curNumProcactiveConts}")
-    var timeSinceLastProactive = (curInstant - lastTime_ProactivelySpawned)
+    var timeSinceLastProactive = (curInstant - lastTime_ProactivelySpawnedByType(actType))
     var timeSinceLastUpdated = (curInstant - lastUpdated)
 
     if( (myTypeConts==0) && (inFlightReqsByType(actType)==1) && (timeSinceLastProactive >= statsTimeoutInMilli) ){
@@ -557,8 +555,8 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         }
       }
 
-      lastTime_ProactivelySpawned = curInstant
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      lastTime_ProactivelySpawnedByType(actType) = curInstant
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }else if(timeSinceLastProactive >= statsTimeoutInMilli){
       nextInvokerSpawnDecision = true
 
@@ -572,16 +570,16 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
         }
       }      
 
-      lastTime_ProactivelySpawned = curInstant
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      lastTime_ProactivelySpawnedByType(actType) = curInstant
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }else if(timeSinceLastUpdated >= heartbeatTimeoutInMilli){
       // to ensure the proactively spawned containers in the next invoker doesn't die..
       nextInvokerSpawnDecision = true
       curInvokerSpawnDecision = true // hack, because, isProactiveNeeded wants this to check whether next invoker can accommodate more requests..
       curInvokerNumContsToSpawn = 0 // this is OK, since i don't want to send dummy reqs to myself anyway..
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince-lastUpdated: ${timeSinceLastUpdated} is greater than heartbeat-timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince-lastUpdated: ${timeSinceLastUpdated} is greater than heartbeat-timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }else{
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> NOPE. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawned} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> NOPE. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }
     
     if(curInvokerNumContsToSpawn>0){
@@ -639,7 +637,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     if(adjustedDummyReqs>0){
       inFlightReqsByType(actType)= inFlightReqsByType(actType) + adjustedDummyReqs  
       logging.info(this,s"\t <avs_debug> <AIS:CDRBI> 4. Invoker-${id.toInt} inFlightReqsByType is ${beginInFlightReqs} will have ${adjustedDummyReqs} more requests. So inFlightReqsByType(actType)")
-      lastTime_ProactivelySpawned = Instant.now.toEpochMilli // doesn't matter who proactively spawned me, it makes sense to update it.
+      lastTime_ProactivelySpawnedByType(actType) = Instant.now.toEpochMilli // doesn't matter who proactively spawned me, it makes sense to update it.
     }
     (adjustedDummyReqs,retVal)
   }
@@ -664,18 +662,18 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var actType = getActionType(actionName)  
     var retVal: Boolean = false
     var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
-    //updateActTypeStats()
-    //var myTypeConts = numConts(actType)  
 
     logging.info(this,s"\t <avs_debug> <AIS:capRem> 0. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
     logging.info(this,s"\t <avs_debug> <AIS:capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
 
+    var curInstanceTotalReqs = inFlightReqsByType("ET") + inFlightReqsByType("MP")
     var curInstanceMaxReqs =  maxInFlightReqsByType(actType) 
     if (status_opZone == opZoneWarn) 
       curInstanceMaxReqs =  0.5 * maxInFlightReqsByType(actType) 
 
     //if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
-    if ( ( inFlightReqsByType(actType) < curInstanceMaxReqs) && (status_opZone!= opZoneUnSafe ) ){
+    //if ( ( inFlightReqsByType(actType) < curInstanceMaxReqs) && (status_opZone!= opZoneUnSafe ) ){
+    if ( ( curInstanceTotalReqs < curInstanceMaxReqs) && (status_opZone!= opZoneUnSafe ) ){
       logging.info(this,s"\t <avs_debug> <AIS:capRem> myConts: ${myConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
       // ok, I don't have too many pending requests here..
       retVal = true
@@ -686,7 +684,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     }
     if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
 
-    logging.info(this,s"\t <avs_debug> <AIS:capRem> Final. invoker: ${id.toInt} has action: ${actionName} has curInstanceMaxReqs: ${curInstanceMaxReqs} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
+    logging.info(this,s"\t <avs_debug> <AIS:capRem> Final. invoker: ${id.toInt} has action: ${actionName} has curInstanceTotalReqs: ${curInstanceTotalReqs} curInstanceMaxReqs: ${curInstanceMaxReqs} actualMaxReqs: ${maxInFlightReqsByType(actType)} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
     (inFlightReqsByType(actType),retVal)
   }
 
