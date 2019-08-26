@@ -668,8 +668,14 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
     var curInstanceTotalReqs = inFlightReqsByType("ET") + inFlightReqsByType("MP")
     var curInstanceMaxReqs =  maxInFlightReqsByType(actType) 
-    if (status_opZone == opZoneWarn) 
-      curInstanceMaxReqs =  0.5 * maxInFlightReqsByType(actType) 
+    if (status_opZone == opZoneWarn) {
+      if(curInstanceTotalReqs!=inFlightReqsByType(actType)){ // if colocated, can support slightly better latencies..
+        curInstanceMaxReqs =  0.75 * maxInFlightReqsByType(actType) 
+      }else{
+        curInstanceMaxReqs =  0.5 * maxInFlightReqsByType(actType)   
+      }
+      
+    }
 
     //if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
     //if ( ( inFlightReqsByType(actType) < curInstanceMaxReqs) && (status_opZone!= opZoneUnSafe ) ){
