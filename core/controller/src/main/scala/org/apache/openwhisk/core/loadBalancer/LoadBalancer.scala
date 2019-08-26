@@ -62,6 +62,7 @@ class functionInfo {
   }   
 
   def getFunctionRuntime(functionName: String): Long = {
+
     containerStandaloneRuntime.get(functionName) match {
       case Some(funcStandaloneRuntime) => 
       funcStandaloneRuntime
@@ -69,6 +70,7 @@ class functionInfo {
       var maxRuntime:Long = 60*5*1000
       maxRuntime
     }
+    
   }
 
   def getActionType(functionName: String): String = {

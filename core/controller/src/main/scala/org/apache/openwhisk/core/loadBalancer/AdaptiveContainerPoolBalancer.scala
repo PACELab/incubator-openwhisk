@@ -638,7 +638,7 @@ case class AdaptiveContainerPoolBalancerState(
 
   var aipmInit: Boolean = false
   var _allInvokersUsed: Boolean = false
-  val numProactiveContsToSpawn = 1
+  val numProactiveContsToSpawn = 2
   val curInvokerProactiveContsToSpawn = 1
 
 
