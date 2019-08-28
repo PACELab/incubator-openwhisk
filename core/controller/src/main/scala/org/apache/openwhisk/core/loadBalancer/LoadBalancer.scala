@@ -644,13 +644,13 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     (adjustedDummyReqs,retVal)
   }
 
-  def issuedSomeDummyReqs(actionName: String, issuedNumDummyReqs: Int): Unit = {
+  def issuedAReq(actionName: String, issuedNumDummyReqs: Int): Unit = {
     var actType = getActionType(actionName)
     inFlightReqsByType(actType)+=issuedNumDummyReqs
     if( inFlightReqsByType(actType) > maxInFlightReqsByType(actType) ){
-      logging.info(this,s"\t <avs_debug> <AIS:issueDummyReq> 1. DANGER DANGER In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} are more than the maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
+      logging.info(this,s"\t <avs_debug> <AIS:issuedAReq> 1. DANGER DANGER In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} are more than the maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
     }else{
-      logging.info(this,s"\t <avs_debug> <AIS:issuedDummyReq> 2. ALL-COOL In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} is less than maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
+      logging.info(this,s"\t <avs_debug> <AIS:issuedAReq> 2. ALL-COOL In invoker-${id.toInt} in pursuit of issuing ${issuedNumDummyReqs} inFlightReqsByType: ${inFlightReqsByType(actType)} is less than maxInFlightReqs: ${maxInFlightReqsByType(actType)} ")      
     }
   }
 

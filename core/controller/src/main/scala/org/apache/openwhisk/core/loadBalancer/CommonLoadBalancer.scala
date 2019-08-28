@@ -315,6 +315,23 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
       }     
   }
 
+  //issuedAReq: (InvokerHealth,String) => Unit,
+  type iarType = (InvokerInstanceId,String) => Unit    
+  val iAR: iarType = (invoker: InvokerInstanceId, actionName: String) => {
+    logging.info(this,s"<avs_debug> <issuedAReq> on invoker: ${invoker.toInt}")
+    allInvokers.get(invoker) match {
+      case Some(curInvokerStats) =>
+        logging.info(this,s"<avs_debug> in <issuedAReq> invoker: ${invoker.toInt} is PRESENT in allInvokers ")
+        curInvokerStats.issuedAReq(actionName,1)
+      case None =>
+        allInvokers = allInvokers + (invoker -> new AdapativeInvokerStats(invoker,InvokerState.Healthy,logging) )
+        logging.info(this,s"<avs_debug> in <issuedAReq> invoker: ${invoker.toInt} is ABSENT in allInvokers ")
+        var tempInvokerStats = allInvokers(invoker)
+        tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
+        tempInvokerStats.issuedAReq(actionName,1)
+      }     
+  }  
+
   //type gifaType (String,InvokerHealth) => Option[InvokerInstanceId]
   type guifaType = (String) => Option[InvokerInstanceId]
   //def getUsedInvokerForAction(actionName: String,invoker: InvokerHealth): Option[InvokerInstanceId] = {

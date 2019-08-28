@@ -180,7 +180,7 @@ class LeastConnectionsContainerPoolBalancer(
         schedulingState.invokerSlots,
         action.limits.memory.megabytes,
         //homeInvoker,stepSize
-        action.name.asString,gNC,
+        action.name.asString,gNC
         )
 
       invoker.foreach {
@@ -201,6 +201,7 @@ class LeastConnectionsContainerPoolBalancer(
     chosen
       .map { invoker =>
         prevInvokerUsed = invoker.toInt //avs
+        iAR(invoker,action.name.asString) 
         logging.info(
           this,
           s"activation ${msg.activationId} for '${msg.action.asString}' ($actionType) by namespace '${msg.user.namespace.name.asString}' with memory limit ${action.limits.memory.megabytes}MB assigned to $invoker and prevInvokerUsed: ${prevInvokerUsed}")        
@@ -308,6 +309,7 @@ object LeastConnectionsContainerPoolBalancer extends LoadBalancerProvider {
     slots: Int,
     curActionName: String,
     getNumConnections: (InvokerInstanceId,String) => Int, // needToUpgradeInvoker: (ListBuffer[InvokerHealth])=> Boolean 
+    //issuedAReq: (InvokerHealth,String) => Unit,
     //index: Int,step: Int,
     //stepsDone: Int = 0
     )(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
