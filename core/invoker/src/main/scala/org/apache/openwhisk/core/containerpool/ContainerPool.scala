@@ -407,7 +407,15 @@ class ContainerPool(childFactory: ActorRefFactory => ActorRef,
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1800.0)  
     }else if (functionName =="realTimeAnalytics_v1"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 550.0)  
+    }else if (functionName =="matmulaction_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 30000.0)  
+    }else if (functionName =="matadd_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 30000.0)  
+    }else if (functionName =="sort_v1"){
+      containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 30000.0)  
     }
+
+    
     else if (functionName == "invokerHealthTestAction0"){
       containerStandaloneRuntime = containerStandaloneRuntime + (functionName -> 1350.0)  
     }

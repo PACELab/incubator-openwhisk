@@ -458,7 +458,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     }
   }
 
-  def findActionNumContsOpZone(toCheckAction: String): (Int,Int,Long) = {
+  def findActionNumContsOpZone(toCheckAction: String): (Int,Int,Long,Long) = {
     logging.info(this,s"\t <avs_debug> <AIS:findActionNumContsOpZone> 0. invoker: ${id.toInt} has action: ${toCheckAction}")             
     allActions.get(toCheckAction) match {
       case Some(curActStats) => 
@@ -473,12 +473,12 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
           curActStats.resetStats(curTime,resetStatsTimeoutFlag)
 
         logging.info(this,s"\t <avs_debug> <AIS:findActionNumContsOpZone> 1. invoker: ${id.toInt} has action: ${toCheckAction}, it has numConts: ${curActStats.numConts} and it's opZone: ${curActStats.opZone}")     
-        (curActStats.numConts,curActStats.opZone,curActStats.lastUpdated)
+        (curActStats.numConts,curActStats.opZone,curActStats.lastUpdated,curActStats.movingAvgLatency)
       case None =>
         //allActions = allActions + (toCheckAction -> new ActionStatsPerInvoker(toCheckAction,id.toInt,logging))
         addAction(toCheckAction)
         logging.info(this,s"\t <avs_debug> <AIS:findActionNumContsOpZone> 2. invoker: ${id.toInt} does NOT have action: ${toCheckAction}.")    
-        (0,opZoneSafe,Instant.now.toEpochMilli) // FIX-IT: last param is not right..
+        (0,opZoneSafe,Instant.now.toEpochMilli,0) // FIX-IT: last param is not right..
     }    
   }
 
@@ -491,7 +491,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
       //allActionsOfCurType.foreach{ curAction =>
       allActionsOfCurType.keys.foreach{ curAction =>  
-        val (numConts,thisActOpZone,lastUpdated) = findActionNumContsOpZone(curAction)
+        val (numConts,thisActOpZone,lastUpdated,actLatency) = findActionNumContsOpZone(curAction)
         
         if(maxOpZone < thisActOpZone)
           maxOpZone = thisActOpZone
@@ -532,7 +532,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
   def checkInvokerActTypeOpZone(actionName: String,myProactiveMaxReqs: Int): (Int,Boolean) ={
     var actType = getActionType(actionName)  
     updateActTypeStats()
-    var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
+    var (myConts,status_opZone,lastUpdated,actLatency) = findActionNumContsOpZone(actionName)
     var myTypeConts = numConts(actType)  
 
     var nextInvokerSpawnDecision: Boolean = false
@@ -599,7 +599,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
 
     updateActTypeStats()
     var myTypeConts = numConts(actType)  
-    var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
+    var (myConts,status_opZone,lastUpdated,actLatency) = findActionNumContsOpZone(actionName)
     var adjustedDummyReqs = 0
     var iterNum = 0; var maxIters = 5; var beginInFlightReqs = 0
 
@@ -662,25 +662,37 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     //  Current Assumption: Ok to add a new-action, as long as all acitons are not in unsafe-region.
     
     var actType = getActionType(actionName)  
+    var otherActType = "ET"
+    if(actType=="ET")
+      otherActType = "MP"
+    else
+      otherActType = "ET"
+
     var retVal: Boolean = false
-    var (myConts,status_opZone,lastUpdated) = findActionNumContsOpZone(actionName)
+    var (myConts,status_opZone,lastUpdated,actLatency) = findActionNumContsOpZone(actionName)
+
+    var latencyRatio: Double = (actLatency.toDouble/getFunctionRuntime(actionName))
+    var toleranceRatio: Double = if(latencyRatio > 1.0) ((latencyRatio-1)/(latencyTolerance-1)) else safeBeginThreshold
 
     logging.info(this,s"\t <avs_debug> <AIS:capRem> 0. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
     logging.info(this,s"\t <avs_debug> <AIS:capRem> 2. invoker: ${id.toInt} has action: ${actionName}, myConts: ${myConts}, opZone: ${status_opZone} ")
 
-    var curInstanceTotalReqs = inFlightReqsByType("ET") + inFlightReqsByType("MP")
     var curInstanceMaxReqs =  maxInFlightReqsByType(actType) 
+    /* Used for WoSC conference.
+    var curInstanceTotalReqs = inFlightReqsByType("ET") + inFlightReqsByType("MP")
     if (status_opZone == opZoneWarn) {
       if(curInstanceTotalReqs!=inFlightReqsByType(actType)){ // if colocated, can support slightly better latencies..
         curInstanceMaxReqs =  0.75 * maxInFlightReqsByType(actType) 
       }else{
         curInstanceMaxReqs =  0.5 * maxInFlightReqsByType(actType)   
       }
-      
-    }
+    } */
 
-    //if ( ( inFlightReqsByType(actType) < maxInFlightReqsByType(actType)) && (status_opZone!= opZoneUnSafe ) ){
-    //if ( ( inFlightReqsByType(actType) < curInstanceMaxReqs) && (status_opZone!= opZoneUnSafe ) ){
+    var curInstanceTotalReqs = inFlightReqsByType(actType) 
+    if (status_opZone == opZoneWarn) {
+      curInstanceMaxReqs =  0.75 * maxInFlightReqsByType(actType) 
+    }    
+
     if ( ( curInstanceTotalReqs < curInstanceMaxReqs) && (status_opZone!= opZoneUnSafe ) ){
       logging.info(this,s"\t <avs_debug> <AIS:capRem> myConts: ${myConts} pendingReqs: ${inFlightReqsByType(actType)} numCores: ${myResources.numCores} status_opZone: ${status_opZone}")
       // ok, I don't have too many pending requests here..
@@ -692,7 +704,8 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     }
     if(retVal) inFlightReqsByType(actType) = inFlightReqsByType(actType)+1  // ok will have an outstanding request of my type..
 
-    logging.info(this,s"\t <avs_debug> <AIS:capRem> Final. invoker: ${id.toInt} has action: ${actionName} has curInstanceTotalReqs: ${curInstanceTotalReqs} curInstanceMaxReqs: ${curInstanceMaxReqs} actualMaxReqs: ${maxInFlightReqsByType(actType)} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
+    logging.info(this,s"\t <avs_debug> <AIS:capRem> Final. invoker: ${id.toInt} has action: ${actionName} has curInstanceTotalReqs: ${curInstanceTotalReqs} curInstanceMaxReqs: ${curInstanceMaxReqs} actualMaxReqs: ${maxInFlightReqsByType(actType)} otherActType: ${otherActType} with retVal: ${retVal} and current pendingReqs: ${inFlightReqsByType(actType)} ")
+    logging.info(this,s"\t <avs_debug> <capRem:final> ${id.toInt} ${actionName} ${actLatency} ${f"$toleranceRatio%1.3f"} ${status_opZone} reqs: ${curInstanceTotalReqs} ${curInstanceMaxReqs} ${inFlightReqsByType(otherActType)} retVal: ${retVal} ")
     (inFlightReqsByType(actType),retVal)
   }
 
