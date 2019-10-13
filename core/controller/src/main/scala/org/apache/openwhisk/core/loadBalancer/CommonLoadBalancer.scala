@@ -384,27 +384,29 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
 // add all the actions we want to track. 
 // shoddy implementation, but have to do for now.
     var tempInvokerStats = allInvokers(invoker.id)
-    var actionsToAdd: ListBuffer[String] = new mutable.ListBuffer[String]
-    actionsToAdd+= "imageResizing_v1"
-    actionsToAdd+= "rodinia_nn_v1"
-    actionsToAdd+= "euler3d_cpu_v1"
-    actionsToAdd+= "servingCNN_v1"
-    actionsToAdd+= "realTimeAnalytics_v1"
-    actionsToAdd+= "invokerHealthTestAction0"
+    if(invoker.id.toInt ==0 ){ // hack for new hybrid multinode algo! 
+      var actionsToAdd: ListBuffer[String] = new mutable.ListBuffer[String]
+      actionsToAdd+= "imageResizing_v1"
+      actionsToAdd+= "rodinia_nn_v1"
+      actionsToAdd+= "euler3d_cpu_v1"
+      actionsToAdd+= "servingCNN_v1"
+      actionsToAdd+= "realTimeAnalytics_v1"
+      actionsToAdd+= "invokerHealthTestAction0"
 
-    actionsToAdd.foreach {
-      curAction =>
-        curRunningActions.get(curAction) match {
-          case Some(curActStats) => 
-            logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is PRESENT in curRunningActions and it is being initialized for invoker: ${invoker.id.toInt}")
-            //curActStats.addActionStats(m.invoker,m.latency,m.numConts) // curActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
-            curActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0)
-          case None => 
-            logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is ABSENT in curRunningActions  and it ran on invoker: ${invoker.id.toInt}")              
-            curRunningActions = curRunningActions + (curAction -> new ActionStats(curAction,logging))
-            //curRunningActions = curRunningActions + (m.curActName -> curInvokerStats)
-            var myActStats :ActionStats = curRunningActions(curAction)
-            myActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0) //myActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
+      actionsToAdd.foreach {
+        curAction =>
+          curRunningActions.get(curAction) match {
+            case Some(curActStats) => 
+              logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is PRESENT in curRunningActions and it is being initialized for invoker: ${invoker.id.toInt}")
+              //curActStats.addActionStats(m.invoker,m.latency,m.numConts) // curActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
+              curActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0)
+            case None => 
+              logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is ABSENT in curRunningActions  and it ran on invoker: ${invoker.id.toInt}")              
+              curRunningActions = curRunningActions + (curAction -> new ActionStats(curAction,logging))
+              //curRunningActions = curRunningActions + (m.curActName -> curInvokerStats)
+              var myActStats :ActionStats = curRunningActions(curAction)
+              myActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0) //myActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
+        }
       }
     }
   }  
@@ -477,14 +479,14 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
     allInvokers.get(invoker.id) match {
       case Some(curInvokerStats) =>
         logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is PRESENT in allInvokers ")
-        val (numInFlightReqs,decision) = curInvokerStats.capacityRemaining(actionName)
+        val (numInFlightReqs,curAvgLatency,decision) = curInvokerStats.capacityRemaining(actionName)
         decision
       case None =>
         allInvokers = allInvokers + (invoker.id -> new AdapativeInvokerStats(invoker.id,invoker.status,logging) )
         logging.info(this,s"<avs_debug> in <checkInvokerCapacity> invoker: ${invoker.id.toInt} is ABSENT in allInvokers ")
         var tempInvokerStats = allInvokers(invoker.id)
         tempInvokerStats.updateInvokerResource(4,8*1024) // defaulting to this..
-        val (numInFlightReqs,decision) = tempInvokerStats.capacityRemaining(actionName)
+        val (numInFlightReqs,curAvgLatency,decision) = tempInvokerStats.capacityRemaining(actionName)
         decision
       } 
   }
