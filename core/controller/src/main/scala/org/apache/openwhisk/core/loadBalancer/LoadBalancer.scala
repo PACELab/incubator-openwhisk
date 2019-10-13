@@ -91,15 +91,18 @@ class functionInfo {
 
   var latencyTolerance = 1.15
   var safeBeginThreshold:Double = 0.0
-  var safeEndThreshold:Double = 0.5
-  var warnBeginThreshold:Double = safeEndThreshold
+  var safeEndThreshold:Double = 0.25
+  var spawnInNewInvokerBeginThd: Double = safeEndThreshold
+  var spawnInNewInvokerEndThd: Double = 0.5
+  var warnBeginThreshold:Double = spawnInNewInvokerEndThd
   var warnEndThreshold:Double = 0.75
   var unsafeBeginThreshold:Double = warnEndThreshold
   var unsafeEndThreshold:Double = 100000.0 
 
   var opZoneSafe = 0
-  var opZoneWarn = 1
-  var opZoneUnSafe = 2
+  var opZoneSpawnInNewInvoker = 1
+  var opZoneWarn = 2
+  var opZoneUnSafe = 3
 
   var statsTimeoutInMilli: Long = 60*1000 // 1 minute is the time for docker to die. So, the stats are going to be outdate.
   var heartbeatTimeoutInMilli: Long = 20*1000
@@ -136,7 +139,11 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
     if( (toleranceRatio >= safeBeginThreshold) && (toleranceRatio <= safeEndThreshold)){
         opZone = opZoneSafe
         logging.info(this,s"\t <avs_debug> <ASPI:opZoneUpdate> action:${actionName}, myInvokerID: ${myInvokerID} latencyRatio: ${latencyRatio} toleranceRatio: ${toleranceRatio} is evidently less than, begin: ${safeBeginThreshold} and end: ${safeEndThreshold}, so opzone is SAFE --${opZone}.") 
-    }else if( (toleranceRatio >= warnBeginThreshold) && (toleranceRatio <= warnEndThreshold)){
+    }else if( (toleranceRatio >= spawnInNewInvokerBeginThd) && (toleranceRatio <= spawnInNewInvokerEndThd)){
+        opZone = opZoneSpawnInNewInvoker
+        logging.info(this,s"\t <avs_debug> <ASPI:opZoneUpdate> action:${actionName}, myInvokerID: ${myInvokerID} latencyRatio: ${latencyRatio} toleranceRatio: ${toleranceRatio} is evidently less than, begin: ${safeBeginThreshold} and end: ${safeEndThreshold}, so opzone is SAFE --${opZone}.")       
+    }
+    else if( (toleranceRatio >= warnBeginThreshold) && (toleranceRatio <= warnEndThreshold)){
       opZone = opZoneWarn
       logging.info(this,s"\t <avs_debug> <ASPI:opZoneUpdate> action: ${actionName}, myInvokerID: ${myInvokerID} latencyRatio: ${latencyRatio} toleranceRatio: ${toleranceRatio} is evidently less than, begin: ${warnBeginThreshold} and end: ${warnEndThreshold}, so opzone is in WARNING safe --${opZone}") 
     }else if( (toleranceRatio >= unsafeBeginThreshold) && (toleranceRatio <= unsafeEndThreshold)){
@@ -166,7 +173,6 @@ class ActionStatsPerInvoker(val actionName: String,val myInvokerID: Int,logging:
         opZone = opZoneSafe
       }
 
-      
       movingAvgLatency = 0
       cumulSum = 0
       runningCount = 0
@@ -259,6 +265,7 @@ class ActionStats(val actionName:String,logging: Logging){
     logging.info(this,s"\t <avs_debug> <gasUI> Action: ${actionName} did not get a used invoker :( :( ")
     None
   }
+
   // return type: (nextInvoker,nextInvokerNumReqs,curInvokerNumDummyReqs,nextInvokerProactiveDecision)
   def isAutoscaleProactiveNeeded(toCheckInvoker: InvokerInstanceId,myProactiveMaxReqs: Int,nextInvokerMaxProactiveReqs: Int): (InvokerInstanceId,Int,Int,Boolean) = {
 
@@ -273,7 +280,7 @@ class ActionStats(val actionName:String,logging: Logging){
       case Some(curInvokerStats) => 
         logging.info(this,s"\t <avs_debug> <IASPN> Action: ${actionName}, toCheckInvoker: ${toCheckInvoker.toInt} checking whether it requires proactive Spawning..")
           // If I fit, I will choose this.
-        val (curInvokerNumContsToSpawn,decision) = curInvokerStats.checkInvokerActTypeOpZone(actionName,myProactiveMaxReqs)
+        val (curInvokerNumContsToSpawn,decision) = curInvokerStats.needProactiveReqs(actionName,myProactiveMaxReqs)
           
         if(decision){ 
           var internalLoopIdx = -1 // OG-AUTOSCALE!
@@ -529,7 +536,7 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     inFlightReqsByType("ET")+inFlightReqsByType("MP")
   }
 
-  def checkInvokerActTypeOpZone(actionName: String,myProactiveMaxReqs: Int): (Int,Boolean) ={
+  def needProactiveReqs(actionName: String,myProactiveMaxReqs: Int): (Int,Boolean) ={
     var actType = getActionType(actionName)  
     updateActTypeStats()
     var (myConts,status_opZone,lastUpdated,actLatency) = findActionNumContsOpZone(actionName)
@@ -544,44 +551,34 @@ class AdapativeInvokerStats(val id: InvokerInstanceId, val status: InvokerState,
     var timeSinceLastProactive = (curInstant - lastTime_ProactivelySpawnedByType(actType))
     var timeSinceLastUpdated = (curInstant - lastUpdated)
 
-    if( (myTypeConts==0) && (inFlightReqsByType(actType)==1) && (timeSinceLastProactive >= statsTimeoutInMilli) ){
-      nextInvokerSpawnDecision = true
+    //if( (myTypeConts==0) && (inFlightReqsByType(actType)==1) && (timeSinceLastProactive >= statsTimeoutInMilli) ){
+    if( (status_opZone>=opZoneSpawnInNewInvoker) ){
+      if(timeSinceLastProactive >= statsTimeoutInMilli){
+        nextInvokerSpawnDecision = true
 
-      if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
-        curInvokerSpawnDecision = true
-        if(myConts==0){
-          curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts - inFlightReqsByType(actType)  
-        }else{
-          // WARNING: Check adjustedDummyReqs calculatation in CDRBI mehtod.
-          curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts
-        }
+        if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
+          curInvokerSpawnDecision = true
+          if(myConts==0){
+            curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts - inFlightReqsByType(actType)  
+          }else{
+            // WARNING: Check adjustedDummyReqs calculatation in CDRBI mehtod.
+            curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts 
+          }
+        }      
+
+        lastTime_ProactivelySpawnedByType(actType) = curInstant
+        logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      }else if(timeSinceLastUpdated >= heartbeatTimeoutInMilli){
+        // to ensure the proactively spawned containers in the next invoker doesn't die..
+        nextInvokerSpawnDecision = true
+        curInvokerSpawnDecision = true // hack, because, isProactiveNeeded wants this to check whether next invoker can accommodate more requests..
+
+        curInvokerNumContsToSpawn = 0 // this is OK, since i don't want to send dummy reqs to myself anyway..
+        logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince-lastUpdated: ${timeSinceLastUpdated} is greater than heartbeat-timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
+      }else{
+        logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> NOPE. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
       }
 
-      lastTime_ProactivelySpawnedByType(actType) = curInstant
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 1. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
-    }else if(timeSinceLastProactive >= statsTimeoutInMilli){
-      nextInvokerSpawnDecision = true
-
-      if(myConts< 0.5 * getMyMaxInFlightReqs(actionName)){
-        curInvokerSpawnDecision = true
-        if(myConts==0){
-          curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts - inFlightReqsByType(actType)  
-        }else{
-          // WARNING: Check adjustedDummyReqs calculatation in CDRBI mehtod.
-          curInvokerNumContsToSpawn = getMyMaxInFlightReqs(actionName).toInt - myConts 
-        }
-      }      
-
-      lastTime_ProactivelySpawnedByType(actType) = curInstant
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 2. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${statsTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
-    }else if(timeSinceLastUpdated >= heartbeatTimeoutInMilli){
-      // to ensure the proactively spawned containers in the next invoker doesn't die..
-      nextInvokerSpawnDecision = true
-      curInvokerSpawnDecision = true // hack, because, isProactiveNeeded wants this to check whether next invoker can accommodate more requests..
-      curInvokerNumContsToSpawn = 0 // this is OK, since i don't want to send dummy reqs to myself anyway..
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> 3. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince-lastUpdated: ${timeSinceLastUpdated} is greater than heartbeat-timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
-    }else{
-      logging.info(this,s"\t <avs_debug> <AIS:cInvActOpZ> NOPE. invoker: ${id.toInt} myTypeConts: ${myTypeConts} nextInvokerSpawnDecision: ${nextInvokerSpawnDecision} and timSince: ${timeSinceLastProactive} is greater than timeout: ${heartbeatTimeoutInMilli}. So new ts: ${lastTime_ProactivelySpawnedByType(actType)} curInvokerNumContsToSpawn: ${curInvokerNumContsToSpawn}")  
     }
     
     if(curInvokerNumContsToSpawn>0){
