@@ -384,7 +384,7 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
 // add all the actions we want to track. 
 // shoddy implementation, but have to do for now.
     var tempInvokerStats = allInvokers(invoker.id)
-    if(invoker.id.toInt ==0 ){ // hack for new hybrid multinode algo! 
+    if(invoker.id.toInt>=0){ 
       var actionsToAdd: ListBuffer[String] = new mutable.ListBuffer[String]
       actionsToAdd+= "imageResizing_v1"
       actionsToAdd+= "rodinia_nn_v1"
@@ -400,12 +400,14 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
               logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is PRESENT in curRunningActions and it is being initialized for invoker: ${invoker.id.toInt}")
               //curActStats.addActionStats(m.invoker,m.latency,m.numConts) // curActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
               curActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0)
+              if(invoker.id.toInt==0) curActStats.addInUseInvoker(invoker.id,tempInvokerStats,0,10,0) // hack for new hybrid multinode algo! 
             case None => 
               logging.info(this,s"<avs_debug> <addInvokerTracking> action: ${curAction} is ABSENT in curRunningActions  and it ran on invoker: ${invoker.id.toInt}")              
               curRunningActions = curRunningActions + (curAction -> new ActionStats(curAction,logging))
               //curRunningActions = curRunningActions + (m.curActName -> curInvokerStats)
               var myActStats :ActionStats = curRunningActions(curAction)
               myActStats.addActionStats(invoker.id,tempInvokerStats,0,10,0) //myActStats.simplePrint(m.curActName,m.latency,m.numConts,logging)
+              if(invoker.id.toInt==0) myActStats.addInUseInvoker(invoker.id,tempInvokerStats,0,10,0) // hack for new hybrid multinode algo! 
         }
       }
     }

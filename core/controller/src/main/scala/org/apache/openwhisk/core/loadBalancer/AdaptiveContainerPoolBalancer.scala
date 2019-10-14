@@ -641,8 +641,6 @@ case class AdaptiveContainerPoolBalancerState(
   val numProactiveContsToSpawn = 2
   val curInvokerProactiveContsToSpawn = 1
 
-
-  //def numProactiveContsToSpawn: Int = _numProactiveContsToSpawn; def curInvokerProactiveContsToSpawn: Int = _curInvokerProactiveContsToSpawn
 // avs --end
   /**
    * @param memory
